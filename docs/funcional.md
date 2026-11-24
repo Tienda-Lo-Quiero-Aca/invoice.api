@@ -6,20 +6,20 @@ Cómo factura el bot, explicado desde la facturación: qué necesita, qué contr
 
 **Contenido**
 
-1. [Qué necesita una venta para facturarse](#1-qué-necesita-una-venta-para-facturarse)
-2. [El recorrido, paso a paso](#2-el-recorrido-paso-a-paso)
-3. [Factura A o B](#3-factura-a-o-b)
-4. [Conceptos de la factura](#4-conceptos-de-la-factura)
-5. [Controles antes de emitir](#5-controles-antes-de-emitir)
-6. [El CAE](#6-el-cae)
-7. [Notas de crédito](#7-notas-de-crédito)
-8. [Clientes](#8-clientes)
-9. [Sincronización con Madre](#9-sincronización-con-madre)
-10. [Registro de problemas](#10-registro-de-problemas)
+1. [Qué necesita una venta para facturarse](#qué-necesita-una-venta-para-facturarse)
+2. [El recorrido, paso a paso](#el-recorrido-paso-a-paso)
+3. [Factura A o B](#factura-a-o-b)
+4. [Conceptos de la factura](#conceptos-de-la-factura)
+5. [Controles antes de emitir](#controles-antes-de-emitir)
+6. [El CAE](#el-cae)
+7. [Notas de crédito](#notas-de-crédito)
+8. [Clientes](#clientes)
+9. [Sincronización con Madre](#sincronización-con-madre)
+10. [Registro de problemas](#registro-de-problemas)
 
 ---
 
-## 1. Qué necesita una venta para facturarse
+## Qué necesita una venta para facturarse
 
 Para que un TLQV salga facturado tienen que cumplirse todas estas condiciones:
 
@@ -47,7 +47,7 @@ Una venta en `DESPACHADA_USA`, por ejemplo, todavía no se factura: se factura c
 
 ---
 
-## 2. El recorrido, paso a paso
+## El recorrido, paso a paso
 
 El flujo tiene tres etapas. Se puede cortar después de cualquiera con el parámetro `stopAfter`, para revisar antes de seguir.
 
@@ -56,7 +56,7 @@ El flujo tiene tres etapas. Se puede cortar después de cualquiera con el parám
 1. **¿Ya está facturada?** Consulta Madre. Si el TLQV tiene una factura vigente, frena. Una factura anulada por nota de crédito no cuenta como vigente, así que esa venta se puede volver a facturar.
 2. **Datos del pedido.** Los pide a Ops API (con Flokzu como respaldo): comprador, CUIT, domicilio y estado.
 3. **Estado.** Verifica que sea uno de los [estados facturables](#estados-facturables).
-4. **Cliente en Xubio.** Busca si el comprador ya existe. Si no, consulta su condición fiscal en AFIP/ARCA y lo crea. Ver [Clientes](#8-clientes).
+4. **Cliente en Xubio.** Busca si el comprador ya existe. Si no, consulta su condición fiscal en AFIP/ARCA y lo crea. Ver [Clientes](#clientes).
 
 ### Etapa 2 — Datos (`source_data`)
 
@@ -67,7 +67,7 @@ Lee la fila del TLQV en dos solapas de la planilla:
 
 ### Etapa 3 — Factura (`invoice_creation`)
 
-1. Aplica los [controles previos](#5-controles-antes-de-emitir).
+1. Aplica los [controles previos](#controles-antes-de-emitir).
 2. Arma la factura: letra, conceptos e importes.
 3. Compara el total contra `Precio final`.
 4. Si todo cierra y `dryRun` es `false`, la emite en Xubio.
@@ -84,7 +84,7 @@ Lee la fila del TLQV en dos solapas de la planilla:
 
 ---
 
-## 3. Factura A o B
+## Factura A o B
 
 La letra sale de la condición fiscal del comprador:
 
@@ -105,9 +105,9 @@ La letra define dos cosas: **qué columna de la planilla se lee** para cada conc
 
 ---
 
-## 4. Conceptos de la factura
+## Conceptos de la factura
 
-Cada concepto es un producto de Xubio. Todos se leen de la **solapa TLQV**. Si un concepto viene en cero o vacío, no se incluye en la factura (salvo los que son obligatorios — ver [controles](#5-controles-antes-de-emitir)).
+Cada concepto es un producto de Xubio. Todos se leen de la **solapa TLQV**. Si un concepto viene en cero o vacío, no se incluye en la factura (salvo los que son obligatorios — ver [controles](#controles-antes-de-emitir)).
 
 | Concepto | ID Xubio | Factura A | Factura B |
 |---|---|---|---|
@@ -140,7 +140,7 @@ La columna `Comisiones externas` de la solapa TLQV ya incluye el costo de las cu
 
 ---
 
-## 5. Controles antes de emitir
+## Controles antes de emitir
 
 Se aplican en este orden. El primero que no se cumple frena la factura.
 
@@ -180,7 +180,7 @@ Es la verificación fiscal principal. Antes de emitir, el bot suma todos los con
 
 ---
 
-## 6. El CAE
+## El CAE
 
 El bot **crea el comprobante en Xubio, pero no pide el CAE**. Ese paso se hace a mano en Xubio, tanto para facturas como para notas de crédito.
 
@@ -190,7 +190,7 @@ Mientras no tenga CAE, el comprobante existe en Xubio pero no para AFIP. Las res
 
 ---
 
-## 7. Notas de crédito
+## Notas de crédito
 
 Una nota de crédito anula una factura ya emitida. El bot:
 
@@ -204,7 +204,7 @@ Una nota de crédito anula una factura ya emitida. El bot:
 - Si la factura ya tiene una nota de crédito, responde `skipped` y no emite otra. Una nota de crédito duplicada lleva su propio CAE y habría que compensarla.
 - En lote, cada nota se intenta una sola vez: no hay reintentos automáticos sobre un documento fiscal.
 
-**Necesita Madre al día.** Lee la factura desde Madre, así que si se facturó hace minutos y el [backfill](#9-sincronización-con-madre) todavía no corrió, puede no encontrarla.
+**Necesita Madre al día.** Lee la factura desde Madre, así que si se facturó hace minutos y el [backfill](#sincronización-con-madre) todavía no corrió, puede no encontrarla.
 
 ### Orden correcto para corregir una factura
 
@@ -219,7 +219,7 @@ Si se edita el cliente antes del paso 2, AFIP rechaza la nota de crédito.
 
 ---
 
-## 8. Clientes
+## Clientes
 
 ### Cómo se busca o se crea
 
@@ -252,7 +252,7 @@ La consulta fiscal se hace siempre como **CUIT**, nunca como CUIL. Una empresa n
 
 ---
 
-## 9. Sincronización con Madre
+## Sincronización con Madre
 
 Madre guarda una copia de los comprobantes de venta de Xubio. De ahí salen dos cosas críticas:
 
@@ -267,7 +267,7 @@ Si Madre no responde al momento de facturar, el bot **bloquea** en lugar de asum
 
 ---
 
-## 10. Registro de problemas
+## Registro de problemas
 
 Cada venta que no se pudo facturar queda guardada en Madre como un *issue*, con el motivo completo. Es lo que muestra el panel.
 

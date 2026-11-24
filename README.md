@@ -42,10 +42,11 @@ El detalle de cada paso está en la [guía funcional](docs/funcional.md).
 | Producción | `https://invoice.loquieroaca.com` |
 | Local | `http://localhost:3000` |
 
-Además de los endpoints, el servicio publica dos herramientas:
+Además de los endpoints, el servicio publica tres herramientas:
 
 | Herramienta | Ruta | Para qué |
 |---|---|---|
+| Documentación | `/docs` | Esta documentación, navegable y con buscador. |
 | Swagger | `/api/docs` | Probar los endpoints desde el navegador. |
 | Bull Board | `/admin/queues` | Ver el avance de los lotes y del backfill. |
 
@@ -108,6 +109,12 @@ npm run start:dev       # http://localhost:3000
 npm test                # tests unitarios
 npm run lint            # eslint con --fix
 npx tsc --noEmit        # chequeo de tipos
+```
+
+Para ver la documentación como sitio, sin levantar Redis ni el resto del servicio:
+
+```bash
+npm run docs:preview    # http://localhost:4310/docs
 ```
 
 ## Stack

@@ -4,6 +4,7 @@ import { ExpressAdapter as BullBoardExpressAdapter } from '@bull-board/express';
 import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { createDocsSiteRouter } from './app/drivers/docs/docs-site.router';
 import { AppModule } from './app/modules/app.module';
 import { TlqvInvoiceFacturasBulkQueueService } from './app/services/tlqv-invoice-facturas-bulk-queue.service';
 import { TlqvInvoiceNotaCreditoBulkQueueService } from './app/services/tlqv-invoice-nota-credito-bulk-queue.service';
@@ -92,6 +93,28 @@ async function bootstrap() {
       serverAdapter,
     });
     app.use(basePath, serverAdapter.getRouter());
+  }
+
+  if (readBooleanConfig(configService, 'DOCS_SITE_ENABLED', true)) {
+    const docsPath =
+      readOptionalConfig(configService, 'DOCS_SITE_PATH') ?? '/docs';
+    const username = readOptionalConfig(configService, 'DOCS_SITE_USER');
+    const password = readOptionalConfig(configService, 'DOCS_SITE_PASSWORD');
+
+    // With both set the site asks for them and publishes every page; without
+    // them it is open and leaves out the page about the server. The markdown
+    // is read from the repository checkout the service runs from.
+    app.use(
+      docsPath,
+      createDocsSiteRouter({
+        basePath: docsPath,
+        rootDirectory: process.cwd(),
+        credentials:
+          username !== undefined && password !== undefined
+            ? { username, password }
+            : undefined,
+      }),
+    );
   }
 
   await app.listen(process.env.PORT ?? 3000, process.env.HOST ?? '0.0.0.0');

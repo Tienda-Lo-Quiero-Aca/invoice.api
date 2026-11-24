@@ -6,18 +6,18 @@ Cómo está armado el código, con qué servicios habla y cómo se configura.
 
 **Contenido**
 
-1. [Capas del código](#1-capas-del-código)
-2. [Dónde está cada cosa](#2-dónde-está-cada-cosa)
-3. [Integraciones](#3-integraciones)
-4. [Colas](#4-colas)
-5. [Reintentos](#5-reintentos)
-6. [Variables de entorno](#6-variables-de-entorno)
-7. [Tests](#7-tests)
-8. [Limitaciones conocidas](#8-limitaciones-conocidas)
+1. [Capas del código](#capas-del-código)
+2. [Dónde está cada cosa](#dónde-está-cada-cosa)
+3. [Integraciones](#integraciones)
+4. [Colas](#colas)
+5. [Reintentos](#reintentos)
+6. [Variables de entorno](#variables-de-entorno)
+7. [Tests](#tests)
+8. [Limitaciones conocidas](#limitaciones-conocidas)
 
 ---
 
-## 1. Capas del código
+## Capas del código
 
 NestJS 11 con arquitectura hexagonal. La lógica de facturación no depende del framework ni de HTTP: vive en `src/core` y se prueba con mocks simples.
 
@@ -42,7 +42,7 @@ La dirección de las dependencias es siempre hacia adentro: `app` conoce a `core
 
 ---
 
-## 2. Dónde está cada cosa
+## Dónde está cada cosa
 
 | Necesito cambiar… | Archivo |
 |---|---|
@@ -60,10 +60,11 @@ La dirección de las dependencias es siempre hacia adentro: `app` conoce a `core
 | Lote de notas de crédito | `app/services/tlqv-invoice-nota-credito-bulk-queue.service.ts` |
 | Backfill programado | `app/services/xubio-comprobantes-backfill-queue.service.ts` |
 | Swagger, Bull Board, puerto | `main.ts` |
+| Sitio de documentación: páginas publicadas y menú | `app/drivers/docs/docs-site.router.ts` |
 
 ---
 
-## 3. Integraciones
+## Integraciones
 
 | Servicio | Para qué | Qué se llama |
 |---|---|---|
@@ -89,7 +90,7 @@ La dirección de las dependencias es siempre hacia adentro: `app` conoce a `core
 
 ---
 
-## 4. Colas
+## Colas
 
 Tres colas BullMQ sobre Redis, visibles en Bull Board (`/admin/queues`).
 
@@ -108,7 +109,7 @@ Cada trabajo de facturas bloqueado, y cada falla definitiva, se guarda como issu
 
 ---
 
-## 5. Reintentos
+## Reintentos
 
 La regla general: **se reintenta lo que solo lee; no se reintenta lo que pudo haber escrito un comprobante.**
 
@@ -127,7 +128,7 @@ El `429` sí se reintenta: es el único rechazo en el que Xubio no llegó a proc
 
 ---
 
-## 6. Variables de entorno
+## Variables de entorno
 
 El servicio lee `.env` del directorio desde el que arranca. La plantilla está en `.env.example`.
 
@@ -142,6 +143,9 @@ El servicio lee `.env` del directorio desde el que arranca. La plantilla está e
 | `SWAGGER_PATH` | `/api/docs` | |
 | `BULL_BOARD_ENABLED` | `true` | |
 | `BULL_BOARD_BASE_PATH` | `/admin/queues` | |
+| `DOCS_SITE_ENABLED` | `true` | Publica esta documentación como sitio. |
+| `DOCS_SITE_PATH` | `/docs` | |
+| `DOCS_SITE_USER` · `DOCS_SITE_PASSWORD` | — | Si están las dos, el sitio pide usuario y clave y publica todas las páginas. Sin ellas queda abierto y no publica la de operación. |
 
 ### Xubio
 
@@ -201,7 +205,7 @@ El servicio lee `.env` del directorio desde el que arranca. La plantilla está e
 | `REDIS_KEEP_ALIVE_MS` | `30000` | |
 | `REDIS_RETRY_MAX_DELAY_MS` | `2000` | |
 
-### Colas
+### Variables de las colas
 
 Cada cola acepta el mismo juego de variables, con su prefijo:
 
@@ -221,7 +225,7 @@ Cada cola acepta el mismo juego de variables, con su prefijo:
 
 ---
 
-## 7. Tests
+## Tests
 
 ```bash
 npm test             # 30 suites, 247 tests
@@ -237,7 +241,7 @@ Varios llevan el código de la venta real que originó el caso (`TLQV-22280`, `T
 
 ---
 
-## 8. Limitaciones conocidas
+## Limitaciones conocidas
 
 **La fecha "de hoy" se calcula en UTC.** Cuando no se envía `issueDate`, el servicio usa la fecha UTC. Entre las 21:00 y las 23:59 de Argentina eso ya es el día siguiente. Hasta que se corrija, conviene enviar `issueDate` explícita al facturar de noche.
 

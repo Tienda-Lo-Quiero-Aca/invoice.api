@@ -6,14 +6,14 @@ Cómo desplegar, cómo verificar que quedó bien, y qué hacer ante los problema
 
 **Contenido**
 
-1. [Dónde corre](#1-dónde-corre)
-2. [Deploy](#2-deploy)
-3. [Verificar que está sano](#3-verificar-que-está-sano)
-4. [Problemas frecuentes](#4-problemas-frecuentes)
+1. [Dónde corre](#dónde-corre)
+2. [Deploy](#deploy)
+3. [Verificar que está sano](#verificar-que-está-sano)
+4. [Problemas frecuentes](#problemas-frecuentes)
 
 ---
 
-## 1. Dónde corre
+## Dónde corre
 
 | | |
 |---|---|
@@ -33,7 +33,7 @@ El archivo `ecosystem.config.cjs` existe solo en el servidor (no está en el rep
 
 ---
 
-## 2. Deploy
+## Deploy
 
 Tres pasos, y **los tres son necesarios**: traer el código, compilar y reiniciar.
 
@@ -57,6 +57,8 @@ rm -rf dist && mv dist.backup dist && pm2 restart invoice-api
 
 **`--update-env`** hace que PM2 relea el `.env`. Sin eso, sigue con las variables que tenía cargadas.
 
+**Si el cambio es solo de documentación** (`README.md` o `docs/*.md`), alcanza con `git pull`: el sitio en `/docs` lee los textos del repositorio en cada visita, sin compilar ni reiniciar.
+
 ### Confirmar que quedó la versión nueva
 
 El método más confiable es buscar en el compilado algo que solo exista en el cambio que se subió:
@@ -75,7 +77,7 @@ La columna `uptime` tiene que mostrar segundos o minutos, no días.
 
 ---
 
-## 3. Verificar que está sano
+## Verificar que está sano
 
 **El proceso está arriba**
 
@@ -118,13 +120,13 @@ curl -s "https://invoice.loquieroaca.com/internal/tlqv-invoice/issues?status=ope
 
 ---
 
-## 4. Problemas frecuentes
+## Problemas frecuentes
 
 ### Subí un cambio y se sigue comportando igual
 
 Casi siempre faltó compilar o reiniciar. `git pull` solo, o `npm run build` sin `pm2 restart`, no cambian lo que está corriendo.
 
-Una señal clara: el mensaje de un bloqueo sigue usando el texto viejo. Verificar con `pm2 list` que el `uptime` sea reciente, y repetir el [deploy](#2-deploy) completo.
+Una señal clara: el mensaje de un bloqueo sigue usando el texto viejo. Verificar con `pm2 list` que el `uptime` sea reciente, y repetir el [deploy](#deploy) completo.
 
 ### Las credenciales de Xubio dejaron de funcionar
 
@@ -188,7 +190,7 @@ curl -s -X POST "https://invoice.loquieroaca.com/internal/xubio/comprobantes/bac
   -d '{"fechaDesde":"2026-11-24","fechaHasta":"2026-11-24"}'
 ```
 
-Si la sincronización automática no está corriendo, revisar los logs como se indica en [verificar que está sano](#3-verificar-que-está-sano).
+Si la sincronización automática no está corriendo, revisar los logs como se indica en [verificar que está sano](#verificar-que-está-sano).
 
 ### La planilla no responde
 

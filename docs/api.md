@@ -277,7 +277,7 @@ curl -s -X DELETE "$INVOICE_API_URL/internal/tlqv-invoice/facturas/75226596" \
 
 ## Notas de crédito
 
-Cómo funcionan y en qué orden usarlas está en la [guía funcional](funcional.md#7-notas-de-crédito).
+Cómo funcionan y en qué orden usarlas está en la [guía funcional](funcional.md#notas-de-crédito).
 
 ### Emitir una nota de crédito
 
@@ -685,7 +685,7 @@ Ventas que no se pudieron facturar, con su motivo.
 | Parámetro | Descripción |
 |---|---|
 | `status` | `open`, `resolved` o `ignored`. |
-| `reason` | Uno de los motivos listados en la [guía funcional](funcional.md#10-registro-de-problemas). |
+| `reason` | Uno de los motivos listados en la [guía funcional](funcional.md#registro-de-problemas). |
 | `limit` | Cantidad máxima. |
 
 ```bash
