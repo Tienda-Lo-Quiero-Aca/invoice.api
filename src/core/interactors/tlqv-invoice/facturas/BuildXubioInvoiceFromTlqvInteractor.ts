@@ -24,9 +24,13 @@ const XUBIO_PRODUCT_IDS = {
   comisionesExternas: 2460999,
   fletesDomesticos: 2461000,
   fleteInternacional: 2461081,
+  fleteUsa: 3464973,
+  seguroInternacional: 3464974,
 } as const;
 
 const TC_IMPUESTO_FIELD = 'tc impuesto';
+const TLQV_COMISIONES_EXTERNAS_FIELD = 'Comisiones externas';
+const TLQV_FLETE_DOMESTICO_FIELD = 'Flete doméstico';
 
 export interface BuildXubioInvoiceFromTlqvCommand {
   tlqvCode: string;
@@ -58,10 +62,11 @@ export interface XubioInvoiceItemMapping {
    * top of `amount` for the concepts that carry a divisor (Comisiones,
    * Fletes), so `grossAmount` is what the invoice will actually total to
    * once Xubio reconstructs it — this is what must be compared against the
-   * sale price from costos-operaciones, not `amount`.
+   * "Precio final" in the TLQV sheet, not `amount`.
    */
   grossAmount: number;
   divisor?: number;
+  vatAddedByXubio?: number;
   multiplierField?: string;
   multiplierValue?: number;
   skipped: boolean;
@@ -77,6 +82,12 @@ type InvoiceItemDefinition = {
   sourceSheet: 'TLQV' | 'MADRE';
   sourceField: string;
   divisor?: number;
+  /**
+   * For a column that already holds the net amount of a taxed concept: the
+   * factor Xubio applies on top (1.21). The amount is sent untouched; only
+   * `grossAmount`, used by the total check, includes it.
+   */
+  vatAddedByXubio?: number;
   /**
    * TLQV field to multiply the raw value by. Used for concepts (like Impuestos
    * Internos / Anti Dumping) that only have a foreign-currency column in the
@@ -151,8 +162,10 @@ function buildItemMappings(
       definition.multiplierField === undefined
         ? undefined
         : parseMoneyLikeNumber(tlqvData[definition.multiplierField]);
-    const grossAmount = parseMoneyLikeNumber(rawValue) * (multiplierValue ?? 1);
-    const amount = roundMoney(grossAmount / (definition.divisor ?? 1));
+    const sourceAmount =
+      parseMoneyLikeNumber(rawValue) * (multiplierValue ?? 1);
+    const amount = roundMoney(sourceAmount / (definition.divisor ?? 1));
+    const grossAmount = sourceAmount * (definition.vatAddedByXubio ?? 1);
 
     if (amount === 0) {
       return {
@@ -181,7 +194,7 @@ function buildItemMappings(
  * Sum of every non-skipped concept's gross (pre-divisor, unrounded) amount,
  * rounded once at the end. This is what the invoice must total to once Xubio
  * adds VAT back on top of the concepts we send net — comparing it against
- * "Precio de venta" from costos-operaciones is the fiscal cross-check for
+ * "Precio final" in the TLQV sheet is the fiscal cross-check for
  * whether the invoice is safe to emit.
  */
 export function computeExpectedInvoiceTotal(
@@ -237,7 +250,7 @@ function getInvoiceItemDefinitions(
         // Product 2461080 is taxed at 21% in Xubio, so a letter A invoice
         // sends it net and Xubio adds the VAT back on top — the sheet's
         // LAFACTURA.B column is that gross value (LAFACTURA * 1.21), and it
-        // is what "Precio de venta" in costos-operaciones is built from.
+        // is what the sale total ("Precio final") is built from.
         // Reading the net column here made computeExpectedInvoiceTotal fall
         // short by exactly the VAT and blocked otherwise valid invoices.
         // The amount sent to Xubio is unchanged: LAFACTURA.B / 1.21.
@@ -247,15 +260,19 @@ function getInvoiceItemDefinitions(
       {
         concept: 'Comisiones externas',
         productId: XUBIO_PRODUCT_IDS.comisionesExternas,
-        sourceSheet: 'MADRE',
-        sourceField: 'COMISIONML',
+        // These two used to come from MADRE (COMISIONML / COSTOENVIO). They
+        // moved to the TLQV sheet, where the commission already includes the
+        // cost of cuotas — the MADRE columns do not, so reading them left the
+        // total short of the sale price on every sale paid in cuotas.
+        sourceSheet: 'TLQV',
+        sourceField: TLQV_COMISIONES_EXTERNAS_FIELD,
         divisor: VAT_21_DIVISOR,
       },
       {
         concept: 'Fletes domesticos',
         productId: XUBIO_PRODUCT_IDS.fletesDomesticos,
-        sourceSheet: 'MADRE',
-        sourceField: 'COSTOENVIO',
+        sourceSheet: 'TLQV',
+        sourceField: TLQV_FLETE_DOMESTICO_FIELD,
         divisor: VAT_21_DIVISOR,
       },
       {
@@ -263,6 +280,27 @@ function getInvoiceItemDefinitions(
         productId: XUBIO_PRODUCT_IDS.fleteInternacional,
         sourceSheet: 'TLQV',
         sourceField: 'FLETEINTERNACIONALA',
+      },
+      {
+        concept: 'Flete U.S.A.',
+        productId: XUBIO_PRODUCT_IDS.fleteUsa,
+        sourceSheet: 'TLQV',
+        // Not taxed: FLETEUSAA and FLETEUSAB carry the same value, like the
+        // two flete internacional columns.
+        sourceField: 'FLETEUSAA',
+      },
+      {
+        concept: 'Seguro Internacional',
+        productId: XUBIO_PRODUCT_IDS.seguroInternacional,
+        sourceSheet: 'TLQV',
+        // SEGUROINTA already comes net of VAT, so it is sent as it is. The
+        // product is taxed at 21% (SEGUROINTB is SEGUROINTA * 1.21), and Xubio
+        // adds that VAT on a letter A invoice: vatAddedByXubio only tells the
+        // total check to count it, without touching the amount sent. Without
+        // it the expected total falls short of "Precio final" by exactly
+        // that VAT and the invoice is blocked.
+        sourceField: 'SEGUROINTA',
+        vatAddedByXubio: VAT_21_DIVISOR,
       },
     ];
   }
@@ -308,20 +346,32 @@ function getInvoiceItemDefinitions(
     {
       concept: 'Comisiones externas',
       productId: XUBIO_PRODUCT_IDS.comisionesExternas,
-      sourceSheet: 'MADRE',
-      sourceField: 'COMISIONML',
+      sourceSheet: 'TLQV',
+      sourceField: TLQV_COMISIONES_EXTERNAS_FIELD,
     },
     {
       concept: 'Fletes domesticos',
       productId: XUBIO_PRODUCT_IDS.fletesDomesticos,
-      sourceSheet: 'MADRE',
-      sourceField: 'COSTOENVIO',
+      sourceSheet: 'TLQV',
+      sourceField: TLQV_FLETE_DOMESTICO_FIELD,
     },
     {
       concept: 'Flete internacional',
       productId: XUBIO_PRODUCT_IDS.fleteInternacional,
       sourceSheet: 'TLQV',
       sourceField: 'FLETEINTERNACIONALB',
+    },
+    {
+      concept: 'Flete U.S.A.',
+      productId: XUBIO_PRODUCT_IDS.fleteUsa,
+      sourceSheet: 'TLQV',
+      sourceField: 'FLETEUSAB',
+    },
+    {
+      concept: 'Seguro Internacional',
+      productId: XUBIO_PRODUCT_IDS.seguroInternacional,
+      sourceSheet: 'TLQV',
+      sourceField: 'SEGUROINTB',
     },
   ];
 }

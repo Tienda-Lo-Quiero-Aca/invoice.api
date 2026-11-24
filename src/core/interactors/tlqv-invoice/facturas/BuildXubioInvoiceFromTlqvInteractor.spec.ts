@@ -20,11 +20,11 @@ describe('BuildXubioInvoiceFromTlqvInteractor', () => {
         LAFACTURA: '21280.00',
         'LAFACTURA.B': '25748.80',
         FLETEINTERNACIONALA: '326354.12',
+        'Comisiones externas': '210,834.72',
+        'Flete doméstico': '7,470.00',
       }),
       madreSheetItem: createMadreItem({
         NROVENTA: '2000017369931210',
-        COMISIONML: '$210,834.72',
-        COSTOENVIO: '$7,470.00',
       }),
     });
 
@@ -94,11 +94,11 @@ describe('BuildXubioInvoiceFromTlqvInteractor', () => {
         LAFACTURA: '21280.00',
         'LAFACTURA.B': '25748.80',
         FLETEINTERNACIONALA: '1795507.33',
+        'Comisiones externas': '0',
+        'Flete doméstico': '0',
       }),
       madreSheetItem: createMadreItem({
         NROVENTA: '2000017655168916',
-        COMISIONML: '0',
-        COSTOENVIO: '0',
       }),
     });
 
@@ -186,11 +186,11 @@ describe('BuildXubioInvoiceFromTlqvInteractor', () => {
         LAFACTURA: '21420.00',
         'LAFACTURA.B': '25918.20',
         FLETEINTERNACIONALA: '2100507.46',
+        'Comisiones externas': '406,280.00',
+        'Flete doméstico': '29,410.00',
       }),
       madreSheetItem: createMadreItem({
         NROVENTA: '2000018197302938',
-        COMISIONML: '$406,280.00',
-        COSTOENVIO: '$29,410.00',
       }),
     });
 
@@ -210,6 +210,150 @@ describe('BuildXubioInvoiceFromTlqvInteractor', () => {
     expect(computeExpectedInvoiceTotal(result.itemMappings)).toBe(2902000);
   });
 
+  it('adds Flete U.S.A. and Seguro Internacional to an A invoice from the A columns (TLQV-22280)', () => {
+    const result = new BuildXubioInvoiceFromTlqvInteractor().execute({
+      tlqvCode: 'TLQV-22280',
+      customerId: 10441659,
+      fiscalCondition: 'RESPONSABLE INSCRIPTO',
+      issueDate: '2026-11-24',
+      tlqvSheetItem: createTlqvItem(TLQV_22280_SHEET),
+      madreSheetItem: createMadreItem(TLQV_22280_MADRE),
+    });
+
+    // Flete U.S.A. is not taxed: column A as it comes.
+    expect(
+      result.invoice.items.find((item) => item.productId === 3464973),
+    ).toEqual(
+      expect.objectContaining({
+        description: 'Flete U.S.A.',
+        unitPrice: 3785.99,
+        priceWithVat: 0,
+      }),
+    );
+
+    // Seguro Internacional: SEGUROINTA as it comes, already net of VAT. The
+    // product is taxed at 21%, so Xubio adds it and the total check counts it.
+    const seguro = result.itemMappings.find(
+      (mapping) => mapping.productId === 3464974,
+    );
+    expect(seguro?.sourceField).toBe('SEGUROINTA');
+    expect(seguro?.rawValue).toBe('1978.51');
+    expect(seguro?.amount).toBe(1978.51);
+    expect(seguro?.grossAmount).toBeCloseTo(2394, 2);
+    expect(
+      result.invoice.items.find((item) => item.productId === 3464974),
+    ).toEqual(
+      expect.objectContaining({
+        description: 'Seguro Internacional',
+        unitPrice: 1978.51,
+        priceWithVat: 0,
+      }),
+    );
+
+    // "Precio de venta" in costos-operaciones is $1,309,000.00. Without the
+    // two concepts the total fell $6,179.99 short and the invoice was blocked;
+    // without counting the VAT of the seguro it still fell $415.49 short.
+    expect(computeExpectedInvoiceTotal(result.itemMappings)).toBe(1309000.01);
+  });
+
+  it('adds Flete U.S.A. and Seguro Internacional to a B invoice from the B columns (TLQV-22280)', () => {
+    const result = new BuildXubioInvoiceFromTlqvInteractor().execute({
+      tlqvCode: 'TLQV-22280',
+      customerId: 10441659,
+      fiscalCondition: 'CONSUMIDOR FINAL',
+      issueDate: '2026-11-24',
+      tlqvSheetItem: createTlqvItem(TLQV_22280_SHEET),
+      madreSheetItem: createMadreItem(TLQV_22280_MADRE),
+    });
+
+    expect(
+      result.invoice.items.find((item) => item.productId === 3464973),
+    ).toEqual(
+      expect.objectContaining({
+        description: 'Flete U.S.A.',
+        unitPrice: 3785.99,
+        priceWithVat: 3785.99,
+      }),
+    );
+    expect(
+      result.invoice.items.find((item) => item.productId === 3464974),
+    ).toEqual(
+      expect.objectContaining({
+        description: 'Seguro Internacional',
+        unitPrice: 2394,
+        priceWithVat: 2394,
+      }),
+    );
+    expect(computeExpectedInvoiceTotal(result.itemMappings)).toBe(1309000.01);
+  });
+
+  it('reads Comisiones externas and Fletes domesticos from the TLQV sheet, where the commission includes the cuotas cost (TLQV-22284)', () => {
+    const result = new BuildXubioInvoiceFromTlqvInteractor().execute({
+      tlqvCode: 'TLQV-22284',
+      customerId: 10441659,
+      fiscalCondition: 'RESPONSABLE INSCRIPTO',
+      issueDate: '2026-11-24',
+      tlqvSheetItem: createTlqvItem({
+        Productoco: '103833.40',
+        IVAFACTURA: '19983.32',
+        'LAFACTURA.B': '4672.71',
+        FLETEINTERNACIONALA: '43909.62',
+        FLETEUSAA: '3785.99',
+        SEGUROINTA: '663.84',
+        SEGUROINTB: '803.25',
+        'Comisiones externas': '43,990.15',
+        'Flete doméstico': '18,359.90',
+      }),
+      // MADRE still carries the old columns for this sale, without the
+      // $33,883.13 of cuotas. They must not be read any more.
+      madreSheetItem: createMadreItem({
+        NROVENTA: '2000019120000000',
+        COMISIONML: '$10,107.02',
+        COSTOENVIO: '$7,500.00',
+      }),
+    });
+
+    const comisiones = result.itemMappings.find(
+      (mapping) => mapping.productId === 2460999,
+    );
+    expect(comisiones?.sourceSheet).toBe('TLQV');
+    expect(comisiones?.grossAmount).toBe(43990.15);
+    // Letter A keeps the same logic as before: sent net of the 21%.
+    expect(comisiones?.amount).toBe(36355.5);
+
+    const fletes = result.itemMappings.find(
+      (mapping) => mapping.productId === 2461000,
+    );
+    expect(fletes?.sourceSheet).toBe('TLQV');
+    expect(fletes?.amount).toBe(15173.47);
+
+    // "Precio de venta" in costos-operaciones is $239,338.33. Read from MADRE
+    // this fell $44,743 short and the invoice was blocked.
+    expect(computeExpectedInvoiceTotal(result.itemMappings)).toBe(239338.34);
+  });
+
+  it('leaves both concepts out when the sheet has them empty, as on TLQVs loaded before the columns existed', () => {
+    const result = new BuildXubioInvoiceFromTlqvInteractor().execute({
+      tlqvCode: 'TLQV-22310',
+      customerId: 10441659,
+      fiscalCondition: 'RESPONSABLE INSCRIPTO',
+      issueDate: '2026-11-24',
+      tlqvSheetItem: createTlqvItem({
+        Productoco: '135340.30',
+        FLETEINTERNACIONALA: '178793.92',
+        FLETEUSAA: '',
+        FLETEUSAB: '',
+        SEGUROINTA: '',
+        SEGUROINTB: '',
+      }),
+      madreSheetItem: createMadreItem(),
+    });
+
+    expect(result.invoice.items.map((item) => item.productId)).toEqual([
+      2461025, 2461081,
+    ]);
+  });
+
   it('builds a B invoice using VAT-included values', () => {
     const result = new BuildXubioInvoiceFromTlqvInteractor().execute({
       tlqvCode: 'TLQV-15738',
@@ -223,11 +367,11 @@ describe('BuildXubioInvoiceFromTlqvInteractor', () => {
         IVAFACTURA: '28513.22',
         'LAFACTURA.B': '25748.80',
         FLETEINTERNACIONALB: '118403.82',
+        'Comisiones externas': '126,288.52',
+        'Flete doméstico': '7,470.00',
       }),
       madreSheetItem: createMadreItem({
         NROVENTA: '2000017380549140',
-        COMISIONML: '$126,288.52',
-        COSTOENVIO: '$7,470.00',
       }),
     });
 
@@ -266,6 +410,26 @@ describe('BuildXubioInvoiceFromTlqvInteractor', () => {
     ]);
   });
 });
+
+// TLQV-22280 as it is in the TLQV and MADRE sheets.
+const TLQV_22280_SHEET = {
+  Productoco: '311742.68',
+  IVAFACTURA: '61696.36',
+  LAFACTURA: '3861.74',
+  'LAFACTURA.B': '4672.71',
+  FLETEINTERNACIONALA: '720668.27',
+  FLETEINTERNACIONALB: '720668.27',
+  FLETEUSAA: '3785.99',
+  FLETEUSAB: '3785.99',
+  SEGUROINTA: '1978.51',
+  SEGUROINTB: '2394.00',
+  'Comisiones externas': '188,850.00',
+  'Flete doméstico': '15,190.00',
+};
+
+const TLQV_22280_MADRE = {
+  NROVENTA: '2000019101982438',
+};
 
 function createTlqvItem(overrides: Partial<TlqvItem['data']> = {}): TlqvItem {
   return {
@@ -314,8 +478,6 @@ function createMadreItem(
     data: {
       Identificador: 'TLQV-15713',
       NROVENTA: '',
-      COMISIONML: '0',
-      COSTOENVIO: '0',
       ...overrides,
     },
   };

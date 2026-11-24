@@ -32,6 +32,13 @@ export interface TlqvItemData {
   A13VENTA: string;
   FLETEINTERNACIONALA: string;
   FLETEINTERNACIONALB: string;
+  FLETEUSAA?: string;
+  FLETEUSAB?: string;
+  SEGUROINTA?: string;
+  SEGUROINTB?: string;
+  'Comisiones externas'?: string;
+  'Flete doméstico'?: string;
+  'Precio final'?: string;
   'NRO CARGA': string;
   [field: string]: string | undefined;
 }

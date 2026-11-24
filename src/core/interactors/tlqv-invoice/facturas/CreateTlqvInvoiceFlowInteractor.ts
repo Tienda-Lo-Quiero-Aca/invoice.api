@@ -1,5 +1,3 @@
-import type { IGetCostosOperacionesByTlqvCodeRepository } from '../../../adapters/repositories/spreadsheet-api/costos-operaciones/IGetCostosOperacionesByTlqvCodeRepository';
-import type { GetCostosOperacionesByTlqvCodeResponse } from '../../../entities/spreadsheet-api/costos-operaciones/CostosOperaciones';
 import type { IGetMadreItemByTlqvCodeRepository } from '../../../adapters/repositories/spreadsheet-api/madre/IGetMadreItemByTlqvCodeRepository';
 import type { IGetStockBueItemByTlqvCodeRepository } from '../../../adapters/repositories/spreadsheet-api/stock-bue/IGetStockBueItemByTlqvCodeRepository';
 import type { IGetTlqvItemByCodeRepository } from '../../../adapters/repositories/spreadsheet-api/tlqv/IGetTlqvItemByCodeRepository';
@@ -8,7 +6,10 @@ import {
   STOCK_BUE_DISPATCHED_INSTRUCTION,
   type GetStockBueItemByTlqvCodeResponse,
 } from '../../../entities/spreadsheet-api/stock-bue/StockBueItems';
-import type { GetTlqvItemByCodeResponse } from '../../../entities/spreadsheet-api/tlqv/TlqvItems';
+import type {
+  GetTlqvItemByCodeResponse,
+  TlqvItemData,
+} from '../../../entities/spreadsheet-api/tlqv/TlqvItems';
 import type {
   CreateXubioInvoiceCommand,
   CreateXubioInvoiceResponse,
@@ -25,6 +26,11 @@ import {
 } from './BuildXubioInvoiceFromTlqvInteractor';
 
 const INVOICE_TOTAL_TOLERANCE_IN_CENTS = 100;
+const PRECIO_FINAL_FIELD = 'Precio final';
+const REQUIRED_LOADED_TLQV_FIELDS = [
+  'Comisiones externas',
+  'Flete doméstico',
+] as const;
 
 export const TLQV_INVOICE_FLOW_STOP_AFTER_VALUES = [
   'client',
@@ -117,7 +123,6 @@ export class CreateTlqvInvoiceFlowInteractor {
       new Date().toISOString().slice(0, 10),
     private readonly fallbackTlqvSheetRepository?: IGetTlqvItemByCodeRepository,
     private readonly stockBueItemByTlqvCodeRepository?: IGetStockBueItemByTlqvCodeRepository,
-    private readonly costosOperacionesRepository?: IGetCostosOperacionesByTlqvCodeRepository,
   ) {}
 
   async execute(
@@ -319,6 +324,31 @@ export class CreateTlqvInvoiceFlowInteractor {
       };
     }
 
+    const sheetDataBlocker = findTlqvSheetDataBlocker(
+      tlqvCode,
+      sourceData.tlqvSheet.item.data,
+    );
+    if (sheetDataBlocker !== null) {
+      steps.push({
+        name: 'invoice_creation',
+        status: 'blocked',
+        blockers: [sheetDataBlocker],
+      });
+
+      return {
+        status: 'blocked',
+        canContinue: false,
+        tlqvCode,
+        stopAfter,
+        dryRun,
+        steps,
+        clienteFlow,
+        xubioClienteId,
+        sourceData,
+        blockers: [sheetDataBlocker],
+      };
+    }
+
     let invoiceBuild: BuildXubioInvoiceFromTlqvResponse;
     try {
       invoiceBuild = this.buildXubioInvoiceFromTlqvInteractor.execute({
@@ -355,8 +385,11 @@ export class CreateTlqvInvoiceFlowInteractor {
       };
     }
 
-    const totalMismatchBlocker =
-      await this.validateInvoiceTotalMatchesSalePrice(tlqvCode, invoiceBuild);
+    const totalMismatchBlocker = validateInvoiceTotalMatchesPrecioFinal(
+      tlqvCode,
+      invoiceBuild,
+      sourceData.tlqvSheet.item.data[PRECIO_FINAL_FIELD],
+    );
     if (totalMismatchBlocker !== null) {
       steps.push({
         name: 'invoice_creation',
@@ -586,77 +619,6 @@ export class CreateTlqvInvoiceFlowInteractor {
     return fallbackTlqvSheet.found ? fallbackTlqvSheet : tlqvSheet;
   }
 
-  /**
-   * Cross-checks the invoice payload against "Precio de venta" in
-   * costos-operaciones — that field should equal what the invoice ends up
-   * totalling once Xubio adds VAT back on top of the concepts we send net,
-   * within INVOICE_TOTAL_TOLERANCE_IN_CENTS (rounding differences between
-   * sheets have been off by up to $1 in practice). Fails closed: if the
-   * repository isn't configured, the lookup fails, there's no
-   * costos-operaciones row for this TLQV yet, or the sale price can't be
-   * read, the invoice is blocked rather than emitted unverified.
-   */
-  private async validateInvoiceTotalMatchesSalePrice(
-    tlqvCode: string,
-    invoiceBuild: BuildXubioInvoiceFromTlqvResponse,
-  ): Promise<TlqvInvoiceFlowBlocker | null> {
-    if (this.costosOperacionesRepository === undefined) {
-      return {
-        code: 'COSTOS_OPERACIONES_NOT_CONFIGURED',
-        message:
-          'El repositorio de costos-operaciones no está configurado; no se puede validar el total de la factura contra "Precio de venta".',
-        step: 'invoice_creation',
-      };
-    }
-
-    let costosResponse: GetCostosOperacionesByTlqvCodeResponse;
-    try {
-      costosResponse = await this.costosOperacionesRepository.getByTlqvCode({
-        tlqvCode,
-      });
-    } catch (error: unknown) {
-      return {
-        code: 'COSTOS_OPERACIONES_LOOKUP_FAILED',
-        message: `No se pudo consultar costos-operaciones para ${tlqvCode}. ${getErrorMessage(error)}`,
-        step: 'invoice_creation',
-      };
-    }
-
-    if (!costosResponse.found) {
-      return {
-        code: 'COSTOS_OPERACIONES_NOT_FOUND',
-        message: `${tlqvCode} no existe en la solapa costos-operaciones; no se puede validar el total de la factura.`,
-        step: 'invoice_creation',
-      };
-    }
-
-    const precioVentaRaw = costosResponse.item.data['Precio de venta'];
-    const precioVenta = parseMoneyLikeNumber(precioVentaRaw);
-    if (precioVenta === 0) {
-      return {
-        code: 'COSTOS_OPERACIONES_SALE_PRICE_MISSING',
-        message: `${tlqvCode} no tiene "Precio de venta" válido en costos-operaciones; no se puede validar el total de la factura.`,
-        step: 'invoice_creation',
-      };
-    }
-
-    const expectedTotal = computeExpectedInvoiceTotal(
-      invoiceBuild.itemMappings,
-    );
-    const differenceInCents = Math.abs(
-      Math.round(expectedTotal * 100) - Math.round(precioVenta * 100),
-    );
-    if (differenceInCents <= INVOICE_TOTAL_TOLERANCE_IN_CENTS) {
-      return null;
-    }
-
-    return {
-      code: 'INVOICE_TOTAL_SALE_PRICE_MISMATCH',
-      message: `El total calculado de la factura (${expectedTotal.toFixed(2)}) no coincide con "Precio de venta" en costos-operaciones (${precioVenta.toFixed(2)}) para ${tlqvCode}. Diferencia: ${(differenceInCents / 100).toFixed(2)} (tolerancia: ${(INVOICE_TOTAL_TOLERANCE_IN_CENTS / 100).toFixed(2)}).`,
-      step: 'invoice_creation',
-    };
-  }
-
   private async getStockBueItemByTlqvCode(
     tlqvCode: string,
   ): Promise<GetStockBueItemByTlqvCodeResponse | undefined> {
@@ -672,6 +634,75 @@ export class CreateTlqvInvoiceFlowInteractor {
       return undefined;
     }
   }
+}
+
+/**
+ * What the TLQV sheet has to carry before an invoice is even built.
+ *
+ * An empty "Precio final" is how the sheet marks a cancelled sale, so it must
+ * never be invoiced. Comisiones externas and Flete doméstico are loaded by
+ * hand: an empty cell means nobody filled it in yet, which is different from a
+ * real 0.00 (a sale with no shipping cost) and must not be read as one — the
+ * invoice would go out without that concept.
+ */
+function findTlqvSheetDataBlocker(
+  tlqvCode: string,
+  tlqvData: TlqvItemData,
+): TlqvInvoiceFlowBlocker | null {
+  if (parseMoneyLikeNumber(tlqvData[PRECIO_FINAL_FIELD]) === 0) {
+    return {
+      code: 'TLQV_SALE_CANCELLED',
+      message: `${tlqvCode} no tiene "Precio final" en la solapa TLQV: la venta figura como cancelada y no se factura.`,
+      step: 'invoice_creation',
+    };
+  }
+
+  const missingFields = REQUIRED_LOADED_TLQV_FIELDS.filter((field) =>
+    isBlankCell(tlqvData[field]),
+  );
+  if (missingFields.length > 0) {
+    return {
+      code: 'TLQV_COMISIONES_FLETE_MISSING',
+      message: `${tlqvCode} no tiene cargado ${missingFields.map((field) => `"${field}"`).join(' ni ')} en la solapa TLQV. Completá esa columna (si no corresponde importe, cargá 0) y reintentá.`,
+      step: 'invoice_creation',
+    };
+  }
+
+  return null;
+}
+
+function isBlankCell(value: string | undefined): boolean {
+  return value === undefined || value.trim() === '';
+}
+
+/**
+ * Cross-checks the invoice payload against "Precio final" in the TLQV sheet
+ * before it is emitted: the concepts, counted with the VAT Xubio adds back,
+ * must add up to what the customer actually paid. It used to compare against
+ * "Precio de venta" in costos-operaciones, which is the listed price — a sale
+ * with a Mercado Libre coupon is paid below it, so those never matched.
+ * "Precio final" already has the coupon taken off, and it comes in the same
+ * row the concepts are read from, so there is no second sheet to query.
+ */
+function validateInvoiceTotalMatchesPrecioFinal(
+  tlqvCode: string,
+  invoiceBuild: BuildXubioInvoiceFromTlqvResponse,
+  precioFinalRaw: string | undefined,
+): TlqvInvoiceFlowBlocker | null {
+  const precioFinal = parseMoneyLikeNumber(precioFinalRaw);
+  const expectedTotal = computeExpectedInvoiceTotal(invoiceBuild.itemMappings);
+  const differenceInCents = Math.abs(
+    Math.round(expectedTotal * 100) - Math.round(precioFinal * 100),
+  );
+  if (differenceInCents <= INVOICE_TOTAL_TOLERANCE_IN_CENTS) {
+    return null;
+  }
+
+  return {
+    code: 'INVOICE_TOTAL_SALE_PRICE_MISMATCH',
+    message: `El total calculado de la factura (${expectedTotal.toFixed(2)}) no coincide con "Precio final" de la solapa TLQV (${precioFinal.toFixed(2)}) para ${tlqvCode}. Diferencia: ${(differenceInCents / 100).toFixed(2)} (tolerancia: ${(INVOICE_TOTAL_TOLERANCE_IN_CENTS / 100).toFixed(2)}).`,
+    step: 'invoice_creation',
+  };
 }
 
 function buildTlqvSheetMissingMessage(

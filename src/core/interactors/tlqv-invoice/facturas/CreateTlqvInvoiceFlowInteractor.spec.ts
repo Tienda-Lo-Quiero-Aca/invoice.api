@@ -1,4 +1,3 @@
-import type { IGetCostosOperacionesByTlqvCodeRepository } from '../../../adapters/repositories/spreadsheet-api/costos-operaciones/IGetCostosOperacionesByTlqvCodeRepository';
 import type { IGetMadreItemByTlqvCodeRepository } from '../../../adapters/repositories/spreadsheet-api/madre/IGetMadreItemByTlqvCodeRepository';
 import type { IGetStockBueItemByTlqvCodeRepository } from '../../../adapters/repositories/spreadsheet-api/stock-bue/IGetStockBueItemByTlqvCodeRepository';
 import type { IGetTlqvItemByCodeRepository } from '../../../adapters/repositories/spreadsheet-api/tlqv/IGetTlqvItemByCodeRepository';
@@ -307,22 +306,11 @@ describe('CreateTlqvInvoiceFlowInteractor', () => {
       }),
     ]);
     expect(dependencies.createInvoice.create).not.toHaveBeenCalled();
-    expect(
-      dependencies.costosOperaciones?.getByTlqvCode,
-    ).not.toHaveBeenCalled();
   });
 
-  it('creates the invoice when the computed total matches costos-operaciones "Precio de venta"', async () => {
+  it('creates the invoice when the computed total matches "Precio final" in the TLQV sheet', async () => {
     const dependencies = createDependencies();
-    dependencies.costosOperaciones = createCostosOperacionesRepository();
-    dependencies.costosOperaciones.getByTlqvCode.mockResolvedValue({
-      found: true,
-      tlqvCode: 'TLQV-1569',
-      item: {
-        rowNumber: 1,
-        data: { OPERACIÓN: 'TLQV-1569', 'Precio de venta': '$781,999.10' },
-      },
-    });
+    setPrecioFinal(dependencies, '781,999.10');
     const interactor = createInteractor(dependencies);
 
     const result = await interactor.execute({
@@ -333,25 +321,14 @@ describe('CreateTlqvInvoiceFlowInteractor', () => {
     });
 
     expect(result.status).toBe('completed');
-    expect(dependencies.costosOperaciones.getByTlqvCode).toHaveBeenCalledWith({
-      tlqvCode: 'TLQV-1569',
-    });
     expect(dependencies.createInvoice.create).toHaveBeenCalled();
   });
 
-  it.each(['$782,000.10', '$781,998.10'])(
-    'creates the invoice when the total is off by up to $1 from "Precio de venta" (%s)',
-    async (precioVenta) => {
+  it.each(['782,000.10', '781,998.10'])(
+    'creates the invoice when the total is off by up to $1 from "Precio final" (%s)',
+    async (precioFinal) => {
       const dependencies = createDependencies();
-      dependencies.costosOperaciones = createCostosOperacionesRepository();
-      dependencies.costosOperaciones.getByTlqvCode.mockResolvedValue({
-        found: true,
-        tlqvCode: 'TLQV-1569',
-        item: {
-          rowNumber: 1,
-          data: { OPERACIÓN: 'TLQV-1569', 'Precio de venta': precioVenta },
-        },
-      });
+      setPrecioFinal(dependencies, precioFinal);
       const interactor = createInteractor(dependencies);
 
       const result = await interactor.execute({
@@ -366,17 +343,9 @@ describe('CreateTlqvInvoiceFlowInteractor', () => {
     },
   );
 
-  it('blocks invoice creation when the total is off by more than $1 from "Precio de venta"', async () => {
+  it('blocks invoice creation when the total is off by more than $1 from "Precio final"', async () => {
     const dependencies = createDependencies();
-    dependencies.costosOperaciones = createCostosOperacionesRepository();
-    dependencies.costosOperaciones.getByTlqvCode.mockResolvedValue({
-      found: true,
-      tlqvCode: 'TLQV-1569',
-      item: {
-        rowNumber: 1,
-        data: { OPERACIÓN: 'TLQV-1569', 'Precio de venta': '$782,001.11' },
-      },
-    });
+    setPrecioFinal(dependencies, '782,001.11');
     const interactor = createInteractor(dependencies);
 
     const result = await interactor.execute({
@@ -393,20 +362,16 @@ describe('CreateTlqvInvoiceFlowInteractor', () => {
     expect(result.blockers).toEqual([
       expect.objectContaining({ code: 'INVOICE_TOTAL_SALE_PRICE_MISMATCH' }),
     ]);
+    expect(result.blockers[0].message).toContain('"Precio final"');
     expect(dependencies.createInvoice.create).not.toHaveBeenCalled();
   });
 
-  it('blocks invoice creation when the computed total does not match costos-operaciones "Precio de venta"', async () => {
+  it('blocks a sale with a Mercado Libre coupon whose concepts still add up to the listed price (TLQV-22295)', async () => {
     const dependencies = createDependencies();
-    dependencies.costosOperaciones = createCostosOperacionesRepository();
-    dependencies.costosOperaciones.getByTlqvCode.mockResolvedValue({
-      found: true,
-      tlqvCode: 'TLQV-1569',
-      item: {
-        rowNumber: 1,
-        data: { OPERACIÓN: 'TLQV-1569', 'Precio de venta': '$1,000.00' },
-      },
-    });
+    // The customer paid $50,000 less than the listed price. The concepts in
+    // this fixture add up to the listed $781,999.10, so they do not match what
+    // was actually charged and the invoice must not go out.
+    setPrecioFinal(dependencies, '731,999.10');
     const interactor = createInteractor(dependencies);
 
     const result = await interactor.execute({
@@ -423,20 +388,79 @@ describe('CreateTlqvInvoiceFlowInteractor', () => {
     expect(result.blockers).toEqual([
       expect.objectContaining({
         code: 'INVOICE_TOTAL_SALE_PRICE_MISMATCH',
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- expect.stringContaining() is typed `any` by Jest
-        message: expect.stringContaining('781999.10'),
+        step: 'invoice_creation',
       }),
     ]);
     expect(dependencies.createInvoice.create).not.toHaveBeenCalled();
   });
 
-  it('blocks when costos-operaciones has no row for the TLQV yet (fails closed)', async () => {
+  it.each(['', '0.00', undefined])(
+    'does not invoice a cancelled sale, which the sheet marks with an empty "Precio final" (%p)',
+    async (precioFinal) => {
+      const dependencies = createDependencies();
+      setPrecioFinal(dependencies, precioFinal);
+      const interactor = createInteractor(dependencies);
+
+      const result = await interactor.execute({
+        tlqvCode: 'TLQV-1569',
+        stopAfter: 'invoice_creation',
+        dryRun: false,
+        issueDate: '2026-07-25',
+      });
+
+      expect(result.status).toBe('blocked');
+      if (result.status !== 'blocked') {
+        throw new Error('Expected blocked response');
+      }
+      expect(result.blockers).toEqual([
+        expect.objectContaining({
+          code: 'TLQV_SALE_CANCELLED',
+          step: 'invoice_creation',
+        }),
+      ]);
+      expect(result.blockers[0].message).toContain('cancelada');
+      expect(dependencies.createInvoice.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ['Comisiones externas', { 'Comisiones externas': '' }],
+    ['Flete doméstico', { 'Flete doméstico': '' }],
+    ['Comisiones externas', { 'Comisiones externas': undefined }],
+  ])(
+    'blocks when %s was never loaded in the TLQV sheet, instead of invoicing without it',
+    async (field, overrides) => {
+      const dependencies = createDependencies();
+      setTlqvSheetData(dependencies, overrides);
+      const interactor = createInteractor(dependencies);
+
+      const result = await interactor.execute({
+        tlqvCode: 'TLQV-1569',
+        stopAfter: 'invoice_creation',
+        dryRun: false,
+        issueDate: '2026-07-25',
+      });
+
+      expect(result.status).toBe('blocked');
+      if (result.status !== 'blocked') {
+        throw new Error('Expected blocked response');
+      }
+      expect(result.blockers).toEqual([
+        expect.objectContaining({
+          code: 'TLQV_COMISIONES_FLETE_MISSING',
+          step: 'invoice_creation',
+        }),
+      ]);
+      expect(result.blockers[0].message).toContain(`"${field}"`);
+      expect(dependencies.createInvoice.create).not.toHaveBeenCalled();
+    },
+  );
+
+  it('names both columns when neither was loaded (TLQV-22310)', async () => {
     const dependencies = createDependencies();
-    dependencies.costosOperaciones = createCostosOperacionesRepository();
-    dependencies.costosOperaciones.getByTlqvCode.mockResolvedValue({
-      found: false,
-      tlqvCode: 'TLQV-1569',
-      reason: 'not_found',
+    setTlqvSheetData(dependencies, {
+      'Comisiones externas': '',
+      'Flete doméstico': '',
     });
     const interactor = createInteractor(dependencies);
 
@@ -447,44 +471,22 @@ describe('CreateTlqvInvoiceFlowInteractor', () => {
       issueDate: '2026-07-25',
     });
 
-    expect(result.status).toBe('blocked');
     if (result.status !== 'blocked') {
       throw new Error('Expected blocked response');
     }
-    expect(result.blockers).toEqual([
-      expect.objectContaining({ code: 'COSTOS_OPERACIONES_NOT_FOUND' }),
-    ]);
-    expect(dependencies.createInvoice.create).not.toHaveBeenCalled();
-  });
-
-  it('blocks when costos-operaciones lookup fails', async () => {
-    const dependencies = createDependencies();
-    dependencies.costosOperaciones = createCostosOperacionesRepository();
-    dependencies.costosOperaciones.getByTlqvCode.mockRejectedValue(
-      new Error('timeout of 10000ms exceeded'),
+    expect(result.blockers[0].message).toContain(
+      '"Comisiones externas" ni "Flete doméstico"',
     );
-    const interactor = createInteractor(dependencies);
-
-    const result = await interactor.execute({
-      tlqvCode: 'TLQV-1569',
-      stopAfter: 'invoice_creation',
-      dryRun: false,
-      issueDate: '2026-07-25',
-    });
-
-    expect(result.status).toBe('blocked');
-    if (result.status !== 'blocked') {
-      throw new Error('Expected blocked response');
-    }
-    expect(result.blockers).toEqual([
-      expect.objectContaining({ code: 'COSTOS_OPERACIONES_LOOKUP_FAILED' }),
-    ]);
-    expect(dependencies.createInvoice.create).not.toHaveBeenCalled();
   });
 
-  it('blocks when costos-operaciones repository is not configured', async () => {
+  it('accepts a loaded 0.00 in Flete doméstico: a sale without shipping cost is not a missing value (TLQV-22300)', async () => {
     const dependencies = createDependencies();
-    dependencies.costosOperaciones = undefined;
+    // The fixture's flete is $16,328.49; with it at zero the concepts add up
+    // to that much less, and "Precio final" says so too.
+    setTlqvSheetData(dependencies, {
+      'Flete doméstico': '0.00',
+      'Precio final': '765,670.61',
+    });
     const interactor = createInteractor(dependencies);
 
     const result = await interactor.execute({
@@ -494,13 +496,8 @@ describe('CreateTlqvInvoiceFlowInteractor', () => {
       issueDate: '2026-07-25',
     });
 
-    expect(result.status).toBe('blocked');
-    if (result.status !== 'blocked') {
-      throw new Error('Expected blocked response');
-    }
-    expect(result.blockers).toEqual([
-      expect.objectContaining({ code: 'COSTOS_OPERACIONES_NOT_CONFIGURED' }),
-    ]);
+    expect(result.status).toBe('completed');
+    expect(dependencies.createInvoice.create).toHaveBeenCalled();
   });
 
   it('blocks with a clear date sequence error when Xubio rejects invoice creation by chronological numbering', async () => {
@@ -652,9 +649,6 @@ interface TestDependencies {
     getByTlqvCode: jest.Mock;
   };
   createInvoice: ICreateXubioInvoiceRepository & { create: jest.Mock };
-  costosOperaciones?: IGetCostosOperacionesByTlqvCodeRepository & {
-    getByTlqvCode: jest.Mock;
-  };
 }
 
 function createInteractor(
@@ -669,8 +663,30 @@ function createInteractor(
     () => '2026-07-30',
     dependencies.fallbackTlqvSheet,
     dependencies.stockBueSheet,
-    dependencies.costosOperaciones,
   );
+}
+
+/** Reloads the TLQV sheet row with the given "Precio final" (column AP). */
+function setPrecioFinal(
+  dependencies: TestDependencies,
+  precioFinal: string | undefined,
+): void {
+  setTlqvSheetData(dependencies, { 'Precio final': precioFinal });
+}
+
+/** Reloads the TLQV sheet row with some of its columns changed. */
+function setTlqvSheetData(
+  dependencies: TestDependencies,
+  overrides: Record<string, string | undefined>,
+): void {
+  dependencies.tlqvSheet.getByCode.mockResolvedValue({
+    found: true,
+    tlqvCode: 'TLQV-1569',
+    item: {
+      rowNumber: 22,
+      data: { ...createTlqvItemData(), ...overrides },
+    },
+  });
 }
 
 function createDependencies(
@@ -712,8 +728,6 @@ function createDependencies(
             NOMBREPRODUCTO: 'Tabla De Remo Inflable con su kit de accesorios',
             NROVENTA: '2000007867251585',
             PRECIOVENTA: '$781,999.10',
-            COMISIONML: '$121,209.90',
-            COSTOENVIO: '$16,328.49',
           },
         },
       }),
@@ -738,24 +752,6 @@ function createDependencies(
         xubioPayload: {} as never,
       }),
     },
-    costosOperaciones: {
-      getByTlqvCode: jest.fn().mockResolvedValue({
-        found: true,
-        tlqvCode: 'TLQV-1569',
-        item: {
-          rowNumber: 1,
-          data: { OPERACIÓN: 'TLQV-1569', 'Precio de venta': '$781,999.10' },
-        },
-      }),
-    },
-  };
-}
-
-function createCostosOperacionesRepository(): IGetCostosOperacionesByTlqvCodeRepository & {
-  getByTlqvCode: jest.Mock;
-} {
-  return {
-    getByTlqvCode: jest.fn(),
   };
 }
 
@@ -841,6 +837,9 @@ function createTlqvItemData(): TlqvItemData {
     A13VENTA: '162.06',
     FLETEINTERNACIONALA: '379294.29',
     FLETEINTERNACIONALB: '379294.29',
+    'Comisiones externas': '121,209.90',
+    'Flete doméstico': '16,328.49',
+    'Precio final': '781,999.10',
     'NRO CARGA': '',
   };
 }

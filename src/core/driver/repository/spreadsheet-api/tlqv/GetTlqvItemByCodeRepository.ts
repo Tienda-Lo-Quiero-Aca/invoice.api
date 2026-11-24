@@ -53,6 +53,13 @@ const TLQV_ITEM_REQUIRED_FIELDS = [
 const TLQV_ITEM_OPTIONAL_FIELDS = [
   'Imp Internos',
   'Anti Dumping',
+  'FLETEUSAA',
+  'FLETEUSAB',
+  'SEGUROINTA',
+  'SEGUROINTB',
+  'Comisiones externas',
+  'Flete doméstico',
+  'Precio final',
 ] as const satisfies readonly (keyof TlqvItemData)[];
 
 export interface GetTlqvItemByCodeRepositoryOptions {

@@ -1,6 +1,5 @@
 import type { Provider } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { GetCostosOperacionesByTlqvCodeRepository } from '../../../../core/driver/repository/spreadsheet-api/costos-operaciones/GetCostosOperacionesByTlqvCodeRepository';
 import { GetMadreItemByTlqvCodeRepository } from '../../../../core/driver/repository/spreadsheet-api/madre/GetMadreItemByTlqvCodeRepository';
 import { GetStockBueItemByTlqvCodeRepository } from '../../../../core/driver/repository/spreadsheet-api/stock-bue/GetStockBueItemByTlqvCodeRepository';
 import { GetTlqvItemByCodeRepository } from '../../../../core/driver/repository/spreadsheet-api/tlqv/GetTlqvItemByCodeRepository';
@@ -81,18 +80,6 @@ export const tlqvInvoiceFacturasInteractorProviders: Provider[] = [
           spreadsheetName: 'prueba-lectura',
         }),
         new GetStockBueItemByTlqvCodeRepository({
-          baseUrl: readOptionalConfig(
-            configService,
-            'SPREADSHEET_API_BASE_URL',
-          ),
-          timeoutInMilliseconds: readNumberConfig(
-            configService,
-            'SPREADSHEET_API_TIMEOUT_MS',
-            10_000,
-          ),
-          retryOptions: spreadsheetRetryOptions,
-        }),
-        new GetCostosOperacionesByTlqvCodeRepository({
           baseUrl: readOptionalConfig(
             configService,
             'SPREADSHEET_API_BASE_URL',
