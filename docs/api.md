@@ -23,7 +23,7 @@ export INVOICE_INTERNAL_API_KEY="..."
 
 | Grupo | Endpoints |
 |---|---|
-| [Facturas](#facturas) | Emitir una · Emitir en lote · Estado del lote · Eliminar |
+| [Facturas](#facturas) | Emitir una · Emitir desde la orden de Mercado Libre · Emitir en lote · Estado del lote · Eliminar |
 | [Notas de crédito](#notas-de-crédito) | Emitir una · Emitir en lote · Últimos lotes · Estado del lote |
 | [Clientes](#clientes) | Crear desde TLQV · Crear consumidor final · Crear con datos fiscales |
 | [Consulta fiscal](#consulta-fiscal) | Condición fiscal en AFIP/ARCA |
@@ -142,6 +142,93 @@ Campos útiles de la respuesta:
 ```
 
 Cada bloqueo de este endpoint queda además guardado como [issue](#issues).
+
+---
+
+### Emitir una factura desde la orden de Mercado Libre
+
+```
+POST /internal/tlqv-invoice/facturas/create-from-meli-order
+```
+
+Para las [ventas con entrega en el día](funcional.md#ventas-con-entrega-en-el-día), que no tienen fila en la planilla. Toma el importe y los datos del comprador de la orden de Mercado Libre y emite una factura con un solo concepto, "Producto".
+
+**Body**
+
+| Campo | Tipo | Obligatorio | Descripción |
+|---|---|---|---|
+| `tlqvCode` | string | Sí | Código de la venta. |
+| `dryRun` | boolean | No | Por defecto `true`: arma la factura y la devuelve sin emitirla. |
+| `issueDate` | string | No | Fecha de emisión. Por defecto, hoy. Hasta 10 días hacia atrás. |
+| `fechaFactura` | string | No | Alias de `issueDate`. |
+
+A diferencia del endpoint habitual, no tiene `stopAfter`: siempre recorre el flujo completo, y `dryRun` decide si emite.
+
+**Ejemplo — ver qué factura saldría**
+
+```bash
+curl -s -X POST "$INVOICE_API_URL/internal/tlqv-invoice/facturas/create-from-meli-order" \
+  -H "x-internal-api-key: $INVOICE_INTERNAL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"tlqvCode":"TLQV-23500","dryRun":true}'
+```
+
+**Respuesta**
+
+```json
+{
+  "status": "completed",
+  "canContinue": true,
+  "tlqvCode": "TLQV-23500",
+  "dryRun": true,
+  "steps": [
+    { "name": "meli_order", "status": "completed", "message": "Orden 2000019813708728 obtenida de Mercado Libre." },
+    { "name": "amount_check", "status": "completed", "message": "El importe de Mercado Libre coincide con \"Precio de venta\" de costos-operaciones." },
+    { "name": "client", "status": "completed", "message": "Cliente creado en Xubio." },
+    { "name": "invoice_creation", "status": "skipped", "message": "Factura armada. No se emitió porque dryRun es true." }
+  ],
+  "amountCheck": {
+    "meliTotalAmount": 386749.16,
+    "costosSalePrice": 386749.16,
+    "differenceInCents": 0,
+    "toleranceInCents": 100
+  },
+  "xubioClienteId": 10503039,
+  "invoiceBuild": {
+    "invoiceLetter": { "letter": "B", "matchedRule": "CONSUMIDOR_FINAL" },
+    "meliOrderIds": ["2000019813708728"],
+    "totalAmount": 386749.16,
+    "amountSentToXubio": 386749.16,
+    "invoice": {
+      "type": "Factura",
+      "letter": "B",
+      "customerId": 10503039,
+      "description": "TLQV-23500 ML: 2000019813708728",
+      "items": [
+        {
+          "productId": 2672923,
+          "description": "Cámara De Acción 4k 30fps Go11-us, Portátil Para Vlogging, I Color",
+          "quantity": 1,
+          "unitPrice": 386749.16,
+          "priceWithVat": 386749.16
+        }
+      ]
+    }
+  }
+}
+```
+
+| Campo | Qué trae |
+|---|---|
+| `meliOrders` | Las órdenes de Mercado Libre tal como se leyeron. |
+| `amountCheck` | Los dos importes que se compararon —el de Mercado Libre y el `Precio de venta` de costos-operaciones— y su diferencia en centavos. Viene también cuando el control bloquea. |
+| `invoiceBuild.totalAmount` | Lo que pagó el cliente por los productos, sin envío. |
+| `invoiceBuild.amountSentToXubio` | Lo que se manda a Xubio: igual al total en una B; el total ÷ 1,21 en una A. |
+| `createdInvoice` | Solo si se emitió: número de comprobante y `transaccionId`. |
+
+Cuando se emite, el último paso sale `completed` y aparece `createdInvoice`. Si no se puede facturar, responde `status: "blocked"` con los `blockers`, y queda guardado como [issue](#issues).
+
+> El modo prueba **sí busca o crea al cliente en Xubio**: lo que no hace es emitir la factura. Si el control del importe no cierra, frena antes y no toca Xubio.
 
 ---
 

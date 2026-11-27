@@ -16,6 +16,7 @@ etapa | CÓDIGO: explicación
 - [Etapa cliente](#etapa-cliente)
 - [Etapa datos](#etapa-datos)
 - [Etapa factura](#etapa-factura)
+- [Ventas con entrega en el día](#ventas-con-entrega-en-el-día)
 - [Notas de crédito](#notas-de-crédito)
 - [Consumidor final desde un issue](#consumidor-final-desde-un-issue)
 - [Cuáles se reintentan solos](#cuáles-se-reintentan-solos)
@@ -206,6 +207,66 @@ Xubio rechazó la factura. El mensaje trae lo que respondió.
 Fallas internas: no se obtuvo el ID del cliente, o el servicio arrancó sin la conexión a Xubio configurada.
 
 **Qué hacer:** avisar a desarrollo.
+
+---
+
+## Ventas con entrega en el día
+
+Propios del proceso que factura [desde la orden de Mercado Libre](funcional.md#ventas-con-entrega-en-el-día). Ese proceso comparte además todos los de la [etapa cliente](#etapa-cliente) y los de emisión en Xubio de la [etapa factura](#etapa-factura).
+
+### `MELI_ORDER_NOT_LINKED`
+
+Ops API no tiene una orden de Mercado Libre asociada a ese TLQV. Sin la orden no hay de dónde tomar el importe ni el comprador.
+
+**Qué hacer:** verificar la venta en Ops. Si no es una venta de Mercado Libre, este proceso no aplica.
+
+### `MELI_ORDER_NOT_FOUND`
+
+Mercado Libre no reconoce el número de orden que tiene Ops.
+
+**Qué hacer:** revisar el número de orden cargado en Ops para esa venta.
+
+### `MELI_ORDER_LOOKUP_FAILED` · `ORDER_DETAILS_LOOKUP_FAILED`
+
+No se pudo consultar Mercado Libre, o no se pudo consultar Ops API. No se factura con datos a medias.
+
+**Qué hacer:** reintentar. Si el detalle menciona `MELI_API_INTERNAL_API_KEY` o un error `401`, falta o está mal la clave del servicio de Mercado Libre — ver [configuración](tecnico.md#variables-de-entorno).
+
+### `MELI_ORDER_CANCELLED`
+
+La orden figura cancelada en Mercado Libre.
+
+**Qué hacer:** nada, no se factura.
+
+### `MELI_BILLING_INFO_MISSING`
+
+Mercado Libre no informó el documento del comprador. Sin eso no se puede identificar al cliente.
+
+**Qué hacer:** facturarla a mano, o reintentar más tarde: a veces Mercado Libre demora en devolver los datos de facturación.
+
+### `INVOICE_TOTAL_SALE_PRICE_MISMATCH` (en este proceso)
+
+El importe que informa Mercado Libre no coincide con `Precio de venta` de costos-operaciones, por más de $1. El mensaje trae los dos importes y la diferencia.
+
+**Qué hacer:** revisar cuál de los dos está mal. Lo habitual es que la planilla tenga el precio de lista y la venta se haya cobrado con un descuento, o al revés. Se corrige el `Precio de venta` en costos-operaciones y se reintenta.
+
+### `COSTOS_OPERACIONES_NOT_FOUND` · `COSTOS_OPERACIONES_SALE_PRICE_MISSING`
+
+La venta no está en la solapa costos-operaciones, o está pero sin `Precio de venta`. Sin ese dato no se puede controlar el importe, y no se factura.
+
+**Qué hacer:** cargar la venta, o su precio, en costos-operaciones y reintentar.
+
+### `COSTOS_OPERACIONES_LOOKUP_FAILED`
+
+La planilla no respondió, aun después de reintentar.
+
+**Qué hacer:** reintentar.
+
+### `MELI_ORDER_CURRENCY_NOT_SUPPORTED` · `MELI_ORDER_TOTAL_INVALID`
+
+La orden no está en pesos, o su importe es cero. Son controles de seguridad; no deberían aparecer en una venta normal.
+
+**Qué hacer:** revisar la orden en Mercado Libre.
 
 ---
 

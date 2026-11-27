@@ -130,6 +130,84 @@ export class TlqvInvoiceFacturasController {
 
   @ApiInternalEndpoint()
   @ApiOperation({
+    summary: 'Crear factura Xubio desde la orden de Mercado Libre de un TLQV',
+    description: [
+      'Para ventas que se entregan en el día y no tienen fila en la planilla.',
+      'Busca en Ops API la orden de Mercado Libre del TLQV, toma de ahí el',
+      'importe (sin envío) y los datos de facturación del comprador, y emite',
+      'una factura con un solo concepto, "Producto". Factura B: importe final.',
+      'Factura A: importe neto, y Xubio suma el 21%. dryRun=true (por defecto)',
+      'arma la factura y la devuelve sin emitirla.',
+    ].join(' '),
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['tlqvCode'],
+      properties: {
+        tlqvCode: { type: 'string', example: 'TLQV-23500' },
+        dryRun: {
+          type: 'boolean',
+          default: true,
+          description: 'Para emitir la factura real enviar false.',
+        },
+        issueDate: {
+          type: 'string',
+          example: '2026-11-27',
+          description:
+            'Fecha de emisión YYYY-MM-DD. Opcional. Hasta 10 días hacia atrás.',
+        },
+        fechaFactura: {
+          type: 'string',
+          example: '2026-11-27',
+          description: 'Alias de issueDate.',
+        },
+      },
+      example: { tlqvCode: 'TLQV-23500', dryRun: true },
+    },
+  })
+  @ApiOkResponse({
+    description: 'Factura armada, emitida o bloqueada.',
+    schema: {
+      example: {
+        status: 'completed',
+        canContinue: true,
+        tlqvCode: 'TLQV-23500',
+        dryRun: true,
+        steps: [
+          { name: 'meli_order', status: 'completed' },
+          { name: 'client', status: 'completed' },
+          { name: 'invoice_creation', status: 'skipped' },
+        ],
+        xubioClienteId: 10503039,
+        invoiceBuild: {
+          invoiceLetter: { letter: 'B', matchedRule: 'CONSUMIDOR_FINAL' },
+          meliOrderIds: ['2000019813708728'],
+          totalAmount: 386749.16,
+          amountSentToXubio: 386749.16,
+        },
+      },
+    },
+  })
+  @Post('create-from-meli-order')
+  createFromMeliOrder(
+    @Body()
+    body: {
+      tlqvCode?: string;
+      dryRun?: boolean;
+      issueDate?: string;
+      fechaFactura?: string;
+    } = {},
+  ) {
+    return this.tlqvInvoiceFacturasService.createFromMeliOrder({
+      tlqvCode: readRequiredBodyString(body.tlqvCode, 'tlqvCode'),
+      dryRun: readOptionalBoolean(body.dryRun, 'dryRun'),
+      issueDate: readOptionalIssueDate(body.issueDate, body.fechaFactura),
+    });
+  }
+
+  @ApiInternalEndpoint()
+  @ApiOperation({
     summary: 'Emitir nota de crédito que anula la factura vigente de un TLQV',
     description: [
       'Lee la factura vigente del TLQV en Madre y emite una nota de crédito',

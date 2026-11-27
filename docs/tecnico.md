@@ -48,6 +48,7 @@ La dirección de las dependencias es siempre hacia adentro: `app` conoce a `core
 |---|---|
 | Conceptos de la factura, IDs de Xubio, columnas de la planilla | `core/interactors/tlqv-invoice/facturas/BuildXubioInvoiceFromTlqvInteractor.ts` |
 | Orden del flujo, controles previos, control del total | `core/interactors/tlqv-invoice/facturas/CreateTlqvInvoiceFlowInteractor.ts` |
+| Facturación desde la orden de Mercado Libre | `core/interactors/tlqv-invoice/facturas/CreateMeliOrderInvoiceFlowInteractor.ts` |
 | Regla de factura A o B | `core/interactors/xubio/facturas/ResolveXubioInvoiceLetterInteractor.ts` |
 | Búsqueda y alta de clientes, estados facturables | `core/interactors/tlqv-invoice/clientes/CreateXubioClienteFromTlqvInteractor.ts` |
 | Control de duplicados | `core/interactors/tlqv-invoice/preparacion/PrepareTlqvInvoiceInteractor.ts` |
@@ -73,7 +74,8 @@ La dirección de las dependencias es siempre hacia adentro: `app` conoce a `core
 | **Madre API** | Copia de comprobantes e issues | `/api/internal/xubio/comprobantes` · `/api/internal/invoice/client-issues` |
 | **Ops API** | Datos del pedido | `GET /api/order-details?tlqtNumber=` |
 | **Flokzu** | Respaldo de los datos del pedido | Instancias de proceso |
-| **Spreadsheet API** | Planilla de importes | `GET /sheet/{planilla}/TLQV/{tlqv}` · `GET /sheet/{planilla}/MADRE/{tlqv}` · `GET /sheet/stock-bue/{tlqv}` |
+| **mercadolibre-api** | Detalle de la orden de Mercado Libre: importe y datos de facturación | `GET /meli/orders/{id}` |
+| **Spreadsheet API** | Planilla de importes | `GET /sheet/{planilla}/TLQV/{tlqv}` · `GET /sheet/{planilla}/MADRE/{tlqv}` · `GET /sheet/stock-bue/{tlqv}` · `GET /sheet/costos-operaciones/{tlqv}` |
 | **Redis** | Colas | BullMQ |
 
 ### Notas por integración
@@ -84,7 +86,9 @@ La dirección de las dependencias es siempre hacia adentro: `app` conoce a `core
 
 **Madre API.** Para los comprobantes sincronizados desde Xubio devuelve `productItems` vacío; los conceptos están en `rawDetailPayload.transaccionProductoItems`. Las notas de crédito leen de ahí, y toman el nombre del concepto de `producto.nombre` porque `descripcion` viene vacía.
 
-**Spreadsheet API.** Lee una hoja de Google en vivo, así que es lenta y cada tanto no responde. No soporta bien consultas en paralelo. Los nombres de columna se usan tal cual vienen en el encabezado.
+**mercadolibre-api.** Es un servicio interno, no la API de Mercado Libre directa: junta en una respuesta lo que Mercado Libre reparte en cinco consultas. Usa su propia clave en `x-internal-api-key`. El proceso de entrega en el día reutiliza el paso de cliente del proceso habitual: le pasa los datos de facturación de Mercado Libre como si fueran el pedido, con origen `mercadolibre`, que es lo que hace que no se aplique la regla de estados facturables.
+
+**Spreadsheet API.** Lee una hoja de Google en vivo, así que es lenta y cada tanto no responde. No soporta bien consultas en paralelo. Los nombres de columna se usan tal cual vienen en el encabezado. Cada proceso controla el importe contra una solapa distinta: el habitual contra `Precio final` de la solapa TLQV, y el de entrega en el día contra `Precio de venta` de costos-operaciones.
 
 **Ops API.** Las ventas web traen los datos del comprador con el rótulo adelante (`"nombre : Juan"`); el repositorio lo limpia.
 
@@ -169,7 +173,7 @@ El servicio lee `.env` del directorio desde el que arranca. La plantilla está e
 | `XUBIO_COMPROBANTES_BACKFILL_CRON_TZ` | `America/Argentina/Buenos_Aires` | |
 | `XUBIO_COMPROBANTES_BACKFILL_CRON_LOOKBACK_DAYS` | `7` | Días hacia atrás que relee cada corrida. |
 
-### Madre, Ops, TusFacturas, Flokzu
+### Madre, Ops, TusFacturas, Flokzu, Mercado Libre
 
 | Variable | Por defecto | Descripción |
 |---|---|---|
@@ -182,6 +186,9 @@ El servicio lee `.env` del directorio desde el que arranca. La plantilla está e
 | `TUS_FACTURAS_USER_TOKEN` · `TUS_FACTURAS_API_KEY` · `TUS_FACTURAS_API_TOKEN` | — **obligatorias** | |
 | `TUS_FACTURAS_COOKIE` | — | Opcional. |
 | `FLOKZU_BASE_URL` · `FLOKZU_API_KEY` · `FLOKZU_USERNAME` | — | Respaldo de los datos del pedido. |
+| `MELI_API_BASE_URL` | `https://api.meli.loquieroaca.com` | |
+| `MELI_API_INTERNAL_API_KEY` | — | Clave de mercadolibre-api. **Obligatoria para facturar ventas con entrega en el día**; sin ella ese endpoint bloquea. |
+| `MELI_API_TIMEOUT_MS` | `30000` | |
 
 ### Planilla
 
@@ -250,7 +257,5 @@ Varios llevan el código de la venta real que originó el caso (`TLQV-22280`, `T
 **Una venta cancelada puede dejar un cliente creado.** El control de `Precio final` vacío corre en la etapa de factura, después de la de cliente. Si alguien intenta facturar una venta cancelada, la factura se bloquea pero la ficha del cliente puede haberse creado.
 
 **`src/app` casi no tiene tests.** La cobertura está en `src/core`. Controllers, services y colas se verifican a mano.
-
-**Código sin uso.** El repositorio de la solapa `costos-operaciones` sigue en el código pero el flujo de facturación ya no lo usa: el control del total ahora lee `Precio final` de la solapa TLQV.
 
 **`CONTEXTO_COMPLETO_INVOICE_API.txt` está desactualizado.** Es un relevamiento de agosto de 2026, anterior a varios cambios de fondo. Ante una diferencia, vale esta documentación y, por encima de todo, el código.

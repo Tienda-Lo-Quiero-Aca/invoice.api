@@ -737,7 +737,7 @@ function buildTlqvSheetMissingMessage(
   return `${baseMessage} En stock-bue sí existe en row ${stockBueSheet.item.rowNumber}${saleNumber === null ? '' : `, venta ${saleNumber}`}, ${instructionMessage}. ${dispatchedMessage}`;
 }
 
-function buildClienteFlowBlockers(
+export function buildClienteFlowBlockers(
   clienteFlow: CreateXubioClienteFromTlqvResponse,
 ): TlqvInvoiceFlowBlocker[] {
   if (clienteFlow.status === 'blocked') {
@@ -767,7 +767,7 @@ function buildClienteFlowBlockers(
   ];
 }
 
-function buildXubioInvoiceCreationBlocker(
+export function buildXubioInvoiceCreationBlocker(
   error: unknown,
 ): TlqvInvoiceFlowBlocker {
   const message = getErrorMessage(error);
@@ -811,7 +811,7 @@ function hasUnknownXubioOutcome(error: unknown): boolean {
   );
 }
 
-function normalizeRequiredTlqvCode(value: string): string {
+export function normalizeRequiredTlqvCode(value: string): string {
   const normalized = value.trim().toUpperCase();
   if (normalized === '') {
     throw new RangeError('tlqvCode is required');
@@ -821,7 +821,7 @@ function normalizeRequiredTlqvCode(value: string): string {
   return match?.[0] ?? normalized;
 }
 
-function validateIssueDateTolerance(command: {
+export function validateIssueDateTolerance(command: {
   issueDate: string | undefined;
   todayIsoDate: string;
 }):

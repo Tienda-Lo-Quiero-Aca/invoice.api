@@ -1,4 +1,4 @@
-export type TlqvOrderDetailsSource = 'ops_api' | 'flokzu';
+export type TlqvOrderDetailsSource = 'ops_api' | 'flokzu' | 'mercadolibre';
 
 export interface TlqvOrderBuyerData {
   cuitComprador?: string | null;
@@ -45,6 +45,11 @@ export interface TlqvOrderDetails {
   product?: TlqvOrderProductData;
   amounts?: TlqvOrderAmountsData;
   statuses?: TlqvOrderStatusData;
+  /**
+   * Mercado Libre order numbers behind this sale, as Ops API links them. More
+   * than one when the buyer paid several products together (a pack).
+   */
+  meliOrderIds?: string[];
   rawPayload: unknown;
 }
 

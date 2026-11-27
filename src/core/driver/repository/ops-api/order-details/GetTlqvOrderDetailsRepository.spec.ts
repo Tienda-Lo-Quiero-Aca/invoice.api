@@ -42,6 +42,7 @@ describe('GetOpsApiTlqvOrderDetailsRepository', () => {
           codigoPostal: '5127',
           email: null,
         },
+        meliOrderIds: [],
         product: {
           sku: 'B0BWJ2F8NC',
           asin: null,
@@ -105,6 +106,34 @@ describe('GetOpsApiTlqvOrderDetailsRepository', () => {
     expect(result.orderDetails.buyerData.direccion).toBe(
       'Ruta 8 Km 60: Lote 4',
     );
+  });
+
+  it('exposes the Mercado Libre order numbers linked to the sale, a pack included', async () => {
+    const payload = {
+      ...createOpsApiResponse(),
+      meliOrders: [
+        { id: 'a', externalId: '2000019813708728' },
+        { id: 'b', externalId: '2000019813708730' },
+        // Repeated or unusable entries must not end up as orders to fetch.
+        { id: 'c', externalId: '2000019813708728' },
+        { id: 'd', externalId: null },
+        { id: 'e' },
+      ],
+    };
+    const get = jest.fn().mockResolvedValue({ data: payload });
+    const repository = new GetOpsApiTlqvOrderDetailsRepository({
+      httpClient: { get } as unknown as AxiosInstance,
+    });
+
+    const result = await repository.getByTlqvCode({ tlqvCode: 'TLQV-12903' });
+
+    if (!result.found) {
+      throw new Error('Expected order details to be found');
+    }
+    expect(result.orderDetails.meliOrderIds).toEqual([
+      '2000019813708728',
+      '2000019813708730',
+    ]);
   });
 
   it('returns not found when Ops API returns HTTP 404', async () => {

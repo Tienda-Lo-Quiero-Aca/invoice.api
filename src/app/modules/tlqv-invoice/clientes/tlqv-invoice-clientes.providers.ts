@@ -33,30 +33,14 @@ export const tlqvInvoiceClientesInteractorProviders: Provider[] = [
       new CreateXubioClienteFromTlqvInteractor(
         createMadreXubioComprobantesRepository(configService),
         [
-          new GetOpsApiTlqvOrderDetailsRepository({
-            baseUrl: readOptionalConfig(configService, 'OPS_API_BASE_URL'),
-            timeoutInMilliseconds: readNumberConfig(
-              configService,
-              'OPS_API_TIMEOUT_MS',
-              20_000,
-            ),
-          }),
+          createOpsApiOrderDetailsRepository(configService),
           new GetFlokzuTlqvOrderDetailsRepository({
             baseUrl: readOptionalConfig(configService, 'FLOKZU_BASE_URL'),
             apiKey: readOptionalConfig(configService, 'FLOKZU_API_KEY'),
             username: readOptionalConfig(configService, 'FLOKZU_USERNAME'),
           }),
         ],
-        new GetTusFacturasAfipInfoRepository({
-          baseUrl: readOptionalConfig(configService, 'TUS_FACTURAS_BASE_URL'),
-          userToken: readRequiredConfig(
-            configService,
-            'TUS_FACTURAS_USER_TOKEN',
-          ),
-          apiKey: readRequiredConfig(configService, 'TUS_FACTURAS_API_KEY'),
-          apiToken: readRequiredConfig(configService, 'TUS_FACTURAS_API_TOKEN'),
-          cookie: readOptionalConfig(configService, 'TUS_FACTURAS_COOKIE'),
-        }),
+        createTusFacturasAfipInfoRepository(configService),
         createXubioCreateClienteRepository(configService),
         createMadreInvoiceClientIssuesRepository(configService),
         () => new Date(),
@@ -74,3 +58,28 @@ export const tlqvInvoiceClientesInteractorProviders: Provider[] = [
       ),
   },
 ];
+
+export function createOpsApiOrderDetailsRepository(
+  configService: ConfigService,
+): GetOpsApiTlqvOrderDetailsRepository {
+  return new GetOpsApiTlqvOrderDetailsRepository({
+    baseUrl: readOptionalConfig(configService, 'OPS_API_BASE_URL'),
+    timeoutInMilliseconds: readNumberConfig(
+      configService,
+      'OPS_API_TIMEOUT_MS',
+      20_000,
+    ),
+  });
+}
+
+export function createTusFacturasAfipInfoRepository(
+  configService: ConfigService,
+): GetTusFacturasAfipInfoRepository {
+  return new GetTusFacturasAfipInfoRepository({
+    baseUrl: readOptionalConfig(configService, 'TUS_FACTURAS_BASE_URL'),
+    userToken: readRequiredConfig(configService, 'TUS_FACTURAS_USER_TOKEN'),
+    apiKey: readRequiredConfig(configService, 'TUS_FACTURAS_API_KEY'),
+    apiToken: readRequiredConfig(configService, 'TUS_FACTURAS_API_TOKEN'),
+    cookie: readOptionalConfig(configService, 'TUS_FACTURAS_COOKIE'),
+  });
+}

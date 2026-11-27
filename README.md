@@ -8,7 +8,7 @@ Recibe un código de venta (`TLQV-22281`), verifica que se pueda facturar, encue
 
 | | |
 |---|---|
-| **Facturas** | Emite facturas A o B en Xubio a partir de un TLQV, de a una o en lote. |
+| **Facturas** | Emite facturas A o B en Xubio a partir de un TLQV, de a una o en lote. Dos procesos: desde la planilla, o desde la orden de Mercado Libre para las ventas con entrega en el día. |
 | **Notas de crédito** | Anula una factura ya emitida copiando sus conceptos tal como se facturaron. |
 | **Clientes** | Busca al comprador en Xubio y, si no existe, lo crea con los datos fiscales de AFIP/ARCA. |
 | **Control de duplicados** | Mantiene en Madre una copia de los comprobantes de Xubio para no facturar dos veces la misma venta. |

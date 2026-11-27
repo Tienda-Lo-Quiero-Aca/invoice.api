@@ -11,11 +11,12 @@ Cómo factura el bot, explicado desde la facturación: qué necesita, qué contr
 3. [Factura A o B](#factura-a-o-b)
 4. [Conceptos de la factura](#conceptos-de-la-factura)
 5. [Controles antes de emitir](#controles-antes-de-emitir)
-6. [El CAE](#el-cae)
-7. [Notas de crédito](#notas-de-crédito)
-8. [Clientes](#clientes)
-9. [Sincronización con Madre](#sincronización-con-madre)
-10. [Registro de problemas](#registro-de-problemas)
+6. [Ventas con entrega en el día](#ventas-con-entrega-en-el-día)
+7. [El CAE](#el-cae)
+8. [Notas de crédito](#notas-de-crédito)
+9. [Clientes](#clientes)
+10. [Sincronización con Madre](#sincronización-con-madre)
+11. [Registro de problemas](#registro-de-problemas)
 
 ---
 
@@ -177,6 +178,80 @@ Es la verificación fiscal principal. Antes de emitir, el bot suma todos los con
 | **Total** | | **622.999,01** |
 
 `Precio final` de esa venta: **622.999,00**. La diferencia es de un centavo, dentro de la tolerancia → se emite.
+
+---
+
+## Ventas con entrega en el día
+
+Hay ventas que se entregan en el día y **no pasan por la planilla**: no tienen fila en la solapa TLQV de donde tomar los conceptos. Para esas existe un segundo proceso, que arma la factura directamente con la **orden de Mercado Libre**.
+
+Se dispara a mano, con un TLQV, desde su propio [endpoint](api.md#emitir-una-factura-desde-la-orden-de-mercado-libre). Quien factura elige cuál de los dos procesos usar; el control de duplicados impide que una misma venta salga por los dos.
+
+### En qué se diferencia
+
+| | Proceso habitual | Entrega en el día |
+|---|---|---|
+| De dónde salen los importes | Solapa TLQV de la planilla | Orden de Mercado Libre |
+| Conceptos | Once: pagos por cuenta y orden, impuestos, comisiones, fletes… | **Uno solo: "Producto"** (ID Xubio 2672923) |
+| Datos del comprador | Ops API | Datos de facturación de Mercado Libre |
+| Estado del pedido | Tiene que estar en un estado facturable | No se controla: se pueden facturar siempre |
+| Control del importe | Contra `Precio final` de la solapa TLQV | Contra `Precio de venta` de la solapa costos-operaciones |
+
+### El recorrido
+
+1. Con el TLQV, busca en **Ops API** el número de la orden de Mercado Libre.
+2. Con ese número, trae de **Mercado Libre** el importe y los datos de facturación del comprador.
+3. **Controla el importe**: lo que informa Mercado Libre tiene que coincidir con `Precio de venta` de costos-operaciones.
+4. Busca o crea al **cliente** en Xubio, igual que el proceso habitual (ver [Clientes](#clientes)):
+   - Comprador con **DNI** → Consumidor Final → factura B.
+   - Comprador con **CUIT** → se consulta AFIP, y de ahí sale si es A o B.
+5. Arma la factura con una línea "Producto" y, si no es modo prueba, la emite.
+
+### Qué importe se factura
+
+**Lo que el cliente pagó por los productos**: el precio ya con los descuentos aplicados, **sin el envío** ni el costo de financiación.
+
+| Letra | Qué se manda a Xubio |
+|---|---|
+| **B** | El importe final, sin discriminar IVA. |
+| **A** | El importe dividido por 1,21. Xubio le suma el 21%. |
+
+**Ejemplo** — orden 2000019813708728:
+
+| | |
+|---|---:|
+| Precio de lista | 453.999,00 |
+| Descuento a cargo del vendedor | − 67.249,84 |
+| **Lo que pagó el cliente** | **386.749,16** |
+
+El comprador tiene DNI y es Consumidor Final → **factura B por $386.749,16**.
+
+Si fuera Responsable Inscripto saldría una **A**: se mandan $319.627,40 netos y Xubio suma el IVA.
+
+En una factura A el total puede diferir en un centavo de lo cobrado, por el redondeo al separar el IVA.
+
+### El control del importe
+
+Antes de tocar nada en Xubio, compara dos datos que vienen de lugares distintos:
+
+- Lo que **Mercado Libre** dice que se cobró por los productos.
+- El **`Precio de venta`** de la venta en la solapa costos-operaciones.
+
+Si difieren en más de **$1**, la factura no sale. Tampoco sale si la venta no está en costos-operaciones, si no tiene precio cargado, o si la planilla no responde: ante la duda, no factura.
+
+Se compara siempre lo que pagó el cliente. En una factura A, aunque a Xubio vaya el importe neto, el control se hace contra el total con IVA.
+
+El control corre **antes** de buscar o crear al cliente, así una venta que no cierra no deja una ficha creada en Xubio.
+
+### Compras de varios productos
+
+Cuando el cliente paga varios productos juntos, Mercado Libre los registra como varias órdenes de un mismo carrito. Sale **una sola factura** por la suma de todas, con una única línea.
+
+La descripción de la línea lleva el nombre de lo que se vendió, para que la factura no diga solamente "Producto".
+
+### Lo que se mantiene igual
+
+Control de duplicados, punto de venta 00008, fecha hasta 10 días atrás, modo prueba por defecto y **CAE a mano**. Una orden que figura **cancelada** en Mercado Libre no se factura.
 
 ---
 

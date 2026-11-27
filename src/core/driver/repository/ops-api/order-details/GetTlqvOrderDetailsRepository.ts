@@ -181,6 +181,7 @@ function parseOrderDetailsResponse(
       shipping: readOptionalString(statuses, 'shipping'),
       order: readOptionalString(statuses, 'order'),
     },
+    meliOrderIds: readMeliOrderIds(value.meliOrders),
     rawPayload: value,
   };
 
@@ -188,6 +189,30 @@ function parseOrderDetailsResponse(
     found: true,
     orderDetails,
   };
+}
+
+/** `meliOrders[].externalId` is the Mercado Libre order number. */
+function readMeliOrderIds(value: unknown): string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const ids: string[] = [];
+  for (const order of value) {
+    const externalId = isRecord(order)
+      ? readOptionalString(order, 'externalId')
+      : null;
+    const normalized = externalId?.trim();
+    if (
+      normalized !== undefined &&
+      /^\d+$/.test(normalized) &&
+      !ids.includes(normalized)
+    ) {
+      ids.push(normalized);
+    }
+  }
+
+  return ids;
 }
 
 function buildRequestError(

@@ -4,16 +4,30 @@ import {
   INVOICE_CLIENT_ISSUE_REASONS,
   type InvoiceClientIssueReason,
 } from '../../core/entities/invoice/client-issues/InvoiceClientIssue';
-import type {
-  CreateTlqvInvoiceFlowResponse,
-  TlqvInvoiceFlowBlocker,
-} from '../../core/interactors/tlqv-invoice/facturas/CreateTlqvInvoiceFlowInteractor';
+import type { CreateXubioClienteFromTlqvResponse } from '../../core/interactors/tlqv-invoice/clientes/CreateXubioClienteFromTlqvInteractor';
 import { readErrorMessage } from '../drivers/queue/wait-until-queue-ready';
 import { INVOICE_CLIENT_ISSUES_REPOSITORY } from '../modules/tlqv-invoice/issues/tlqv-invoice-issues.providers';
 
+/** A blocker as any invoicing flow reports it. */
+export interface RecordableFlowBlocker {
+  code: string;
+  message: string;
+  step: string;
+}
+
+/**
+ * What the recorder reads from a flow's answer. Both invoicing flows — from
+ * the TLQV sheet and from the Mercado Libre order — satisfy it.
+ */
+export interface RecordableFlowResponse {
+  status: string;
+  blockers?: RecordableFlowBlocker[];
+  clienteFlow?: CreateXubioClienteFromTlqvResponse;
+}
+
 export interface RecordBlockedInvoiceIssueCommand {
   tlqvCode: string;
-  response: CreateTlqvInvoiceFlowResponse;
+  response: RecordableFlowResponse;
   source: string;
   metadata?: Record<string, unknown>;
 }
@@ -56,7 +70,7 @@ export class InvoiceClientIssueRecorderService {
       return;
     }
 
-    const blockers = command.response.blockers;
+    const blockers = command.response.blockers ?? [];
     const reason = resolveInvoiceClientIssueReason(blockers);
 
     if (reason === 'INVALID_FISCAL_DOCUMENT') {
@@ -173,7 +187,7 @@ export class InvoiceClientIssueRecorderService {
 }
 
 function resolveInvoiceClientIssueReason(
-  blockers: TlqvInvoiceFlowBlocker[],
+  blockers: RecordableFlowBlocker[],
 ): InvoiceClientIssueReason {
   for (const blocker of blockers) {
     if (isInvoiceClientIssueReason(blocker.code)) {
@@ -192,7 +206,7 @@ function isInvoiceClientIssueReason(
   );
 }
 
-function buildBlockedIssueMessage(blockers: TlqvInvoiceFlowBlocker[]): string {
+function buildBlockedIssueMessage(blockers: RecordableFlowBlocker[]): string {
   const firstBlocker = blockers[0];
 
   if (firstBlocker === undefined) {
@@ -203,7 +217,7 @@ function buildBlockedIssueMessage(blockers: TlqvInvoiceFlowBlocker[]): string {
 }
 
 function buildBlockedIssueMessages(
-  blockers: TlqvInvoiceFlowBlocker[],
+  blockers: RecordableFlowBlocker[],
 ): string[] {
   if (blockers.length === 0) {
     return ['El flujo de facturación quedó bloqueado.'];
@@ -214,25 +228,19 @@ function buildBlockedIssueMessages(
   );
 }
 
-function readSaleNumber(
-  response: CreateTlqvInvoiceFlowResponse,
-): string | null {
+function readSaleNumber(response: RecordableFlowResponse): string | null {
   return response.clienteFlow?.orderDetails?.saleNumber ?? null;
 }
 
-function readBuyerName(response: CreateTlqvInvoiceFlowResponse): string | null {
+function readBuyerName(response: RecordableFlowResponse): string | null {
   return response.clienteFlow?.buyerData?.nombreDestinatario ?? null;
 }
 
-function readBuyerEmail(
-  response: CreateTlqvInvoiceFlowResponse,
-): string | null {
+function readBuyerEmail(response: RecordableFlowResponse): string | null {
   return response.clienteFlow?.buyerData?.email ?? null;
 }
 
-function readBuyerDocumento(
-  response: CreateTlqvInvoiceFlowResponse,
-): string | null {
+function readBuyerDocumento(response: RecordableFlowResponse): string | null {
   return (
     readClienteFlowFiscalInfo(response)?.documentoNro ??
     response.clienteFlow?.buyerData?.cuitComprador ??
@@ -241,7 +249,7 @@ function readBuyerDocumento(
 }
 
 function readBuyerDocumentoDigits(
-  response: CreateTlqvInvoiceFlowResponse,
+  response: RecordableFlowResponse,
 ): string | null {
   return (
     readClienteFlowFiscalInfo(response)?.documentoNroDigits ??
@@ -250,14 +258,12 @@ function readBuyerDocumentoDigits(
   );
 }
 
-function readDocumentoTipo(
-  response: CreateTlqvInvoiceFlowResponse,
-): string | null {
+function readDocumentoTipo(response: RecordableFlowResponse): string | null {
   return response.clienteFlow?.documentoTipo ?? null;
 }
 
 function readClienteFlowFiscalInfo(
-  response: CreateTlqvInvoiceFlowResponse,
+  response: RecordableFlowResponse,
 ): { documentoNro?: string | null; documentoNroDigits?: string | null } | null {
   const clienteFlow = response.clienteFlow;
 

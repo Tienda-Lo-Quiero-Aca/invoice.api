@@ -5,6 +5,11 @@ import {
   type CreateTlqvInvoiceFlowResponse,
 } from '../../core/interactors/tlqv-invoice/facturas/CreateTlqvInvoiceFlowInteractor';
 import {
+  CreateMeliOrderInvoiceFlowInteractor,
+  type CreateMeliOrderInvoiceFlowCommand,
+  type CreateMeliOrderInvoiceFlowResponse,
+} from '../../core/interactors/tlqv-invoice/facturas/CreateMeliOrderInvoiceFlowInteractor';
+import {
   CreateNotaCreditoFromTlqvInteractor,
   type CreateNotaCreditoFromTlqvCommand,
   type CreateNotaCreditoFromTlqvResponse,
@@ -15,6 +20,7 @@ import type {
   DeleteXubioInvoiceResponse,
 } from '../../core/entities/xubio/facturas/XubioInvoice';
 import {
+  CREATE_MELI_ORDER_INVOICE_FLOW_INTERACTOR,
   CREATE_NOTA_CREDITO_FROM_TLQV_INTERACTOR,
   CREATE_TLQV_INVOICE_FLOW_INTERACTOR,
   DELETE_XUBIO_INVOICE_INTERACTOR,
@@ -22,6 +28,7 @@ import {
 import { InvoiceClientIssueRecorderService } from './invoice-client-issue-recorder.service';
 
 const ISSUE_SOURCE = 'tlqv_invoice_facturas_single';
+const MELI_ORDER_ISSUE_SOURCE = 'tlqv_invoice_facturas_meli_order';
 
 @Injectable()
 export class TlqvInvoiceFacturasService {
@@ -32,8 +39,49 @@ export class TlqvInvoiceFacturasService {
     private readonly deleteXubioInvoiceInteractor: DeleteXubioInvoiceInteractor,
     @Inject(CREATE_NOTA_CREDITO_FROM_TLQV_INTERACTOR)
     private readonly createNotaCreditoFromTlqvInteractor: CreateNotaCreditoFromTlqvInteractor,
+    @Inject(CREATE_MELI_ORDER_INVOICE_FLOW_INTERACTOR)
+    private readonly createMeliOrderInvoiceFlowInteractor: CreateMeliOrderInvoiceFlowInteractor,
     private readonly invoiceClientIssueRecorder: InvoiceClientIssueRecorderService,
   ) {}
+
+  /**
+   * Invoices a sale from its Mercado Libre order. A blocked run is recorded as
+   * an issue, the same way the sheet-based flow does, so it shows in the panel.
+   */
+  async createFromMeliOrder(
+    command: CreateMeliOrderInvoiceFlowCommand,
+  ): Promise<CreateMeliOrderInvoiceFlowResponse> {
+    const metadata = {
+      flow: 'meli_order',
+      dryRun: command.dryRun,
+      issueDate: command.issueDate,
+    };
+
+    try {
+      const response =
+        await this.createMeliOrderInvoiceFlowInteractor.execute(command);
+
+      if (response.status === 'blocked') {
+        await this.invoiceClientIssueRecorder.recordBlocked({
+          tlqvCode: command.tlqvCode,
+          response,
+          source: MELI_ORDER_ISSUE_SOURCE,
+          metadata,
+        });
+      }
+
+      return response;
+    } catch (error: unknown) {
+      await this.invoiceClientIssueRecorder.recordUnhandledFailure({
+        tlqvCode: command.tlqvCode,
+        error,
+        source: MELI_ORDER_ISSUE_SOURCE,
+        metadata,
+      });
+
+      throw error;
+    }
+  }
 
   async createFromTlqv(
     command: CreateTlqvInvoiceFlowCommand,
