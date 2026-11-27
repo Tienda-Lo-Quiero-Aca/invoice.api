@@ -13,10 +13,11 @@ Cómo factura el bot, explicado desde la facturación: qué necesita, qué contr
 5. [Controles antes de emitir](#controles-antes-de-emitir)
 6. [Ventas con entrega en el día](#ventas-con-entrega-en-el-día)
 7. [El CAE](#el-cae)
-8. [Notas de crédito](#notas-de-crédito)
-9. [Clientes](#clientes)
-10. [Sincronización con Madre](#sincronización-con-madre)
-11. [Registro de problemas](#registro-de-problemas)
+8. [Enviar la factura al comprador](#enviar-la-factura-al-comprador)
+9. [Notas de crédito](#notas-de-crédito)
+10. [Clientes](#clientes)
+11. [Sincronización con Madre](#sincronización-con-madre)
+12. [Registro de problemas](#registro-de-problemas)
 
 ---
 
@@ -251,17 +252,91 @@ La descripción de la línea lleva el nombre de lo que se vendió, para que la f
 
 ### Lo que se mantiene igual
 
-Control de duplicados, punto de venta 00008, fecha hasta 10 días atrás, modo prueba por defecto y **CAE a mano**. Una orden que figura **cancelada** en Mercado Libre no se factura.
+Control de duplicados, punto de venta 00008, fecha hasta 10 días atrás, modo prueba por defecto y **CAE pedido aparte**. Una orden que figura **cancelada** en Mercado Libre no se factura.
+
+### Todo de una vez, en lote
+
+Para estas ventas existe un [proceso en lote](api.md#entrega-en-el-día-proceso-completo-en-lote) que hace los tres pasos seguidos, venta por venta:
+
+1. **Emite la factura** desde la orden de Mercado Libre, con todos los controles de arriba.
+2. **Pide el CAE** de esa factura. Ver [El CAE](#el-cae).
+3. **La envía a Mercado Libre**, donde la ve el comprador. Ver [Enviar la factura al comprador](#enviar-la-factura-al-comprador).
+
+Se le pasa una lista de TLQV, los encola y los procesa **de a uno**: termina una venta completa antes de empezar la siguiente.
+
+**Si una etapa no puede seguir, la venta se detiene ahí** y sigue con la próxima. Lo que ya se hizo queda hecho: si falló el CAE, la factura queda emitida sin CAE; si falló el envío, queda con CAE y sin enviar. El resultado dice en qué etapa se detuvo y por qué, y queda guardado como problema para verlo en el panel.
+
+**Se puede volver a mandar la misma venta.** Antes de emitir, el proceso se fija si la venta ya tiene una factura vigente. Si la tiene, **no emite otra**: sigue desde donde quedó. Tampoco pide un CAE que ya tiene, ni manda a Mercado Libre una factura que ya está cargada. Una venta ya terminada, si se manda de nuevo, sale como completa sin tocar nada.
+
+Eso funciona aunque se reenvíe a los pocos minutos, porque la factura nueva se [copia a Madre en el momento](#sincronización-con-madre).
+
+**Arranca en modo prueba**, como todo: arma la factura y muestra qué haría, sin emitir, sin pedir el CAE y sin enviar.
+
+> **Con `dryRun: false` no hay vuelta atrás.** La factura sale con CAE y el comprador la recibe. Corregirla después requiere una nota de crédito.
 
 ---
 
 ## El CAE
 
-El bot **crea el comprobante en Xubio, pero no pide el CAE**. Ese paso se hace a mano en Xubio, tanto para facturas como para notas de crédito.
+Emitir y pedir el CAE son **dos pasos separados**. Al emitir, el bot crea el comprobante en Xubio **sin CAE**, tanto si es una factura como una nota de crédito.
 
 Mientras no tenga CAE, el comprobante existe en Xubio pero no para AFIP. Las respuestas de la API lo informan explícitamente (`caeStatus.pendiente: true`).
 
+El CAE se pide después, de dos maneras: a mano en Xubio, o con el [pedido de CAE](api.md#cae) del bot, de a un comprobante o en lote.
+
+### Cómo pide el CAE el bot
+
+1. Lee el comprobante en Xubio.
+2. Si **ya tiene CAE, no pide otro**: lo saltea.
+3. Le pide a AFIP el CAE, a través de Xubio.
+4. **Vuelve a leer el comprobante** y responde lo que encuentra ahí: tiene CAE, o no lo tiene y por qué.
+
+El paso 4 es el que lo hace confiable. Si Xubio tarda o se corta la respuesta, el bot no adivina: mira el comprobante. Por eso **repetir un pedido es seguro** — si el CAE ya estaba otorgado, lo detecta y no lo pide de nuevo.
+
+### Lo que hay que tener presente
+
+**No se puede deshacer.** Con CAE, el comprobante ya está informado a AFIP. No se borra: se anula con una nota de crédito. Por eso el pedido arranca en modo prueba, que solo muestra qué comprobantes pediría.
+
+**Va en orden.** AFIP autoriza cada numeración en orden: no da el CAE de la factura 4096 si la 4095 todavía no lo tiene. El bot siempre pide del comprobante más viejo al más nuevo, y en lote de a uno. Si uno se rechaza, es esperable que los que le siguen en la misma numeración también.
+
+**Por TLQV o por comprobante.** Se puede pedir por código de venta —toma todos los comprobantes de esa venta que no tengan CAE— o por el ID del comprobante en Xubio. Por TLQV el comprobante tiene que estar en Madre; si se emitió hace minutos, conviene pedirlo por el ID que devolvió la emisión.
+
 > **Importante:** no edites la ficha de un cliente en Xubio mientras tenga comprobantes sin CAE. Al pedir el CAE, AFIP valida los datos del cliente; si cambiaron, rechaza el comprobante.
+
+---
+
+## Enviar la factura al comprador
+
+Una vez que la factura tiene CAE, se puede **adjuntar a la venta en Mercado Libre**. El comprador la ve en el detalle de su compra.
+
+Sirve para las facturas de los dos procesos —el habitual y el de entrega en el día—, siempre que la venta sea de Mercado Libre. Se dispara a mano, por venta, desde su [endpoint](api.md#enviar-la-factura-a-mercado-libre).
+
+### Qué hace
+
+1. Busca la **factura vigente** del TLQV. Si hubo una nota de crédito y una factura nueva, toma la nueva.
+2. Le pregunta a **Xubio** si ya tiene **CAE**.
+3. Busca en **Ops** la orden de Mercado Libre de la venta.
+4. Le pregunta a **Mercado Libre** si esa venta ya tiene una factura cargada.
+5. Descarga el **PDF** de Xubio: el mismo que se imprime desde Xubio, con el CAE y el código QR.
+6. Lo sube a Mercado Libre.
+
+### Las tres reglas
+
+**Sin CAE no se envía.** Una factura sin CAE todavía no es válida para el cliente. El CAE se consulta en Xubio en el momento, no en la copia de Madre, porque se pide después de emitir y Madre puede tener hasta dos horas de atraso.
+
+**Una factura anulada no se envía.** Si todas las facturas de la venta tienen nota de crédito, no hay nada que mandar.
+
+**No se envía dos veces.** Si Mercado Libre ya tiene una factura para esa venta, el proceso la saltea. Esto también hace seguro repetirlo: si una subida falló a mitad de camino, volver a intentar no duplica nada.
+
+### Lo que hay que tener presente
+
+**No se puede deshacer.** No existe forma de borrar una factura ya subida a Mercado Libre. Por eso el proceso arranca en modo prueba: hace todas las verificaciones, baja el PDF y muestra qué enviaría —número de factura, CAE, orden—, sin subir nada.
+
+**Factura rehecha.** Si a una venta se le hizo nota de crédito y factura nueva, Mercado Libre ya tiene cargada la anterior. Para subir la nueva hay que pedirlo explícitamente (`force`).
+
+**Compras de varios productos.** Se sube una sola vez; Mercado Libre la asocia al carrito completo.
+
+**La factura tiene que estar en Madre.** Las que emite el bot están ahí [en el momento](#sincronización-con-madre). Una cargada a mano en Xubio puede tardar hasta la próxima sincronización.
 
 ---
 
@@ -279,14 +354,14 @@ Una nota de crédito anula una factura ya emitida. El bot:
 - Si la factura ya tiene una nota de crédito, responde `skipped` y no emite otra. Una nota de crédito duplicada lleva su propio CAE y habría que compensarla.
 - En lote, cada nota se intenta una sola vez: no hay reintentos automáticos sobre un documento fiscal.
 
-**Necesita Madre al día.** Lee la factura desde Madre, así que si se facturó hace minutos y el [backfill](#sincronización-con-madre) todavía no corrió, puede no encontrarla.
+**Lee la factura desde Madre.** Las facturas que emite el bot están ahí [en el momento](#sincronización-con-madre). Una cargada a mano en Xubio puede tardar hasta la próxima sincronización.
 
 ### Orden correcto para corregir una factura
 
 Cuando hay que corregir una factura mal emitida (por ejemplo, salió B y debía ser A):
 
 1. Emitir la **nota de crédito**.
-2. Pedir el **CAE** de la nota de crédito, a mano en Xubio.
+2. Pedir el **CAE** de la nota de crédito, en Xubio o con el [pedido de CAE](api.md#cae).
 3. Recién entonces, **corregir la ficha del cliente** si hace falta.
 4. Emitir la **factura nueva**.
 
@@ -336,7 +411,13 @@ Madre guarda una copia de los comprobantes de venta de Xubio. De ahí salen dos 
 
 Si Madre se atrasa, el bot queda ciego: no puede distinguir una venta ya facturada de una nueva.
 
-Por eso la copia se actualiza **sola cada 2 horas**, releyendo los últimos 7 días. Releer con superposición evita huecos si una corrida falla o si un comprobante se cargó tarde. También se puede disparar a mano desde la [API](api.md#comprobantes).
+Por eso la copia se mantiene al día de dos maneras:
+
+**En el momento, lo que hace el bot.** Cada vez que el bot emite una factura o una nota de crédito, o consigue un CAE, copia ese comprobante a Madre enseguida. Así el control de duplicados ya sabe de una factura segundos después de emitirla, y una venta con nota de crédito se puede volver a facturar sin esperar.
+
+Si esa copia falla, el comprobante **queda emitido igual** y la respuesta lo avisa (`madreSync`). En ese caso no hay que volver a facturar esa venta hasta la próxima sincronización, porque el control todavía no la ve.
+
+**Cada 2 horas, todo.** Una sincronización relee los últimos 7 días de Xubio. Es la que trae lo que se cargó a mano en Xubio y la que cubre cualquier copia inmediata que haya fallado. Releer con superposición evita huecos si una corrida falla o si un comprobante se cargó tarde. También se puede disparar a mano desde la [API](api.md#comprobantes).
 
 Si Madre no responde al momento de facturar, el bot **bloquea** en lugar de asumir que la venta no está facturada.
 

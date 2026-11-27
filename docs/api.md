@@ -23,7 +23,8 @@ export INVOICE_INTERNAL_API_KEY="..."
 
 | Grupo | Endpoints |
 |---|---|
-| [Facturas](#facturas) | Emitir una · Emitir desde la orden de Mercado Libre · Emitir en lote · Estado del lote · Eliminar |
+| [Facturas](#facturas) | Emitir una · Emitir desde la orden de Mercado Libre · Emitir en lote · Estado del lote · Entrega en el día: proceso completo en lote · Enviar a Mercado Libre · Eliminar |
+| [CAE](#cae) | Pedir uno · Pedir en lote · Estado del lote |
 | [Notas de crédito](#notas-de-crédito) | Emitir una · Emitir en lote · Últimos lotes · Estado del lote |
 | [Clientes](#clientes) | Crear desde TLQV · Crear consumidor final · Crear con datos fiscales |
 | [Consulta fiscal](#consulta-fiscal) | Condición fiscal en AFIP/ARCA |
@@ -35,6 +36,7 @@ export INVOICE_INTERNAL_API_KEY="..."
 
 - **`dryRun`** — todo endpoint que emite un comprobante lo acepta, y **por defecto es `true`**: arma el comprobante y lo devuelve sin mandarlo a Xubio. Para emitir hay que enviar `false` explícitamente.
 - **Bloqueos** — una venta que no se puede facturar no devuelve error HTTP: responde `200` con `status: "blocked"` y la lista de `blockers`. Cada uno trae `code` y `message`. El catálogo está en [Bloqueos](bloqueos.md).
+- **`madreSync`** — cuando una llamada emite un comprobante o consigue un CAE, la respuesta trae `madreSync`, que dice si se copió a Madre en el momento: `{ "status": "synced" }`, o `failed` con un `message`. Con `failed` el comprobante igual quedó emitido, pero no hay que volver a facturar esa venta hasta la próxima [sincronización](funcional.md#sincronización-con-madre).
 - **Errores HTTP** — `400` si falta o es inválido un parámetro; `401` si falta o es incorrecta la clave.
 - **Fechas** — siempre `YYYY-MM-DD`.
 
@@ -341,6 +343,186 @@ Los lotes terminados se van borrando de la cola con el tiempo. El registro perma
 
 ---
 
+### Entrega en el día: proceso completo en lote
+
+```
+POST /internal/tlqv-invoice/facturas/bulk/entrega-en-el-dia
+```
+
+Para ventas con entrega en el día. Por cada TLQV hace los tres pasos seguidos: **emite la factura** desde la orden de Mercado Libre, **pide el CAE** y **la envía a Mercado Libre**. Encola un trabajo por venta y los procesa de a uno. Cómo se comporta está en la [guía funcional](funcional.md#todo-de-una-vez-en-lote).
+
+> **Con `dryRun: false` no hay vuelta atrás:** la factura sale con CAE y el comprador la recibe.
+
+**Body**
+
+| Campo | Tipo | Obligatorio | Descripción |
+|---|---|---|---|
+| `tlqvCodes` | string[] | Sí | Las ventas. Los repetidos se cuentan una vez. |
+| `dryRun` | boolean | No | Por defecto `true`: arma cada factura y muestra qué haría, sin emitir, pedir el CAE ni enviar. |
+| `issueDate` | string | No | Fecha de emisión, común a todas. Hasta 10 días atrás. |
+
+```bash
+curl -s -X POST "$INVOICE_API_URL/internal/tlqv-invoice/facturas/bulk/entrega-en-el-dia" \
+  -H "x-internal-api-key: $INVOICE_INTERNAL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"tlqvCodes":["TLQV-23500","TLQV-23501"],"dryRun":true}'
+```
+
+**Respuesta**
+
+```json
+{
+  "status": "queued",
+  "queueName": "tlqv-invoice-entrega-en-el-dia-bulk",
+  "batchId": "tlqv-entrega-en-el-dia-2026-11-27T15-00-00-000Z-a1b2c3d4",
+  "dryRun": true,
+  "totalRequested": 2,
+  "totalDuplicated": 0,
+  "totalQueued": 2,
+  "bullBoardPath": "/admin/queues",
+  "tlqvCodes": ["TLQV-23500", "TLQV-23501"]
+}
+```
+
+Guardar el `batchId`: es lo que se usa para consultar el avance.
+
+#### Estado del lote
+
+```
+GET /internal/tlqv-invoice/facturas/bulk/entrega-en-el-dia/:batchId
+```
+
+```json
+{
+  "batchId": "tlqv-entrega-en-el-dia-2026-11-27T15-00-00-000Z-a1b2c3d4",
+  "queueName": "tlqv-invoice-entrega-en-el-dia-bulk",
+  "found": true,
+  "totalJobs": 2,
+  "counts": { "completed": 2, "failed": 0, "active": 0, "waiting": 0, "delayed": 0, "paused": 0 },
+  "results": {
+    "completed": 1,
+    "ready": 0,
+    "blocked": 1,
+    "blockedAtInvoice": 0,
+    "blockedAtCae": 1,
+    "blockedAtMeli": 0,
+    "failed": 0,
+    "pending": 0
+  },
+  "jobs": [
+    {
+      "tlqvCode": "TLQV-23500",
+      "state": "completed",
+      "status": "completed",
+      "stoppedAt": null,
+      "invoiceStatus": "created",
+      "transaccionId": 80000001,
+      "numeroDocumento": "B-00008-00004100",
+      "totalAmount": 386749.16,
+      "caeStatus": "authorized",
+      "cae": "86484580124099",
+      "meliStatus": "sent",
+      "meliOrderId": "2000019813708728",
+      "blockerCodes": [],
+      "message": null,
+      "warning": null
+    }
+  ]
+}
+```
+
+`results.pending` en `0` significa que el lote terminó.
+
+| `status` de cada venta | Significado |
+|---|---|
+| `completed` | La venta tiene su factura, con CAE, cargada en Mercado Libre. |
+| `ready` | Modo prueba: no hay nada que lo impida, y esto es lo que se haría. |
+| `blocked` | Se detuvo en la etapa `stoppedAt`. El motivo está en `blockerCodes` y `message`. |
+
+| `stoppedAt` | Cómo quedó la venta | Qué hacer |
+|---|---|---|
+| `invoice` | Sin factura. | Resolver el [bloqueo](bloqueos.md#ventas-con-entrega-en-el-día) y volver a mandarla. |
+| `cae` | Con factura emitida, **sin CAE**. | Resolver el [motivo](bloqueos.md#pedido-de-cae) y volver a mandarla: sigue desde el CAE. |
+| `meli` | Con factura y CAE, **sin enviar**. | Resolver el [motivo](bloqueos.md#envío-a-mercado-libre) y volver a mandarla: solo hace el envío. |
+
+| Campo | Valores |
+|---|---|
+| `invoiceStatus` | `created` se emitió ahora · `existing` la venta ya tenía factura y se siguió con esa · `ready` modo prueba · `blocked` |
+| `caeStatus` | `authorized` se obtuvo ahora · `already_had` ya lo tenía · `ready` modo prueba, se pediría · `pending` no se llegó · `blocked` |
+| `meliStatus` | `sent` se envió ahora · `already_sent` Mercado Libre ya la tenía · `ready` modo prueba, se enviaría · `pending` no se llegó · `blocked` |
+| `warning` | Aviso si la factura nueva no se pudo copiar a Madre en el momento. No frena la venta, pero **no hay que volver a mandarla** hasta la próxima sincronización: no vería la factura y emitiría otra. |
+
+Cada venta se intenta **una sola vez** por lote. Las que se detienen quedan guardadas como [issue](#issues). Los lotes terminados se van borrando de la cola con el tiempo.
+
+---
+
+### Enviar la factura a Mercado Libre
+
+```
+POST /internal/tlqv-invoice/facturas/send-to-meli
+```
+
+Adjunta el PDF de la factura a la venta en Mercado Libre, donde lo ve el comprador. Qué controla y por qué está en la [guía funcional](funcional.md#enviar-la-factura-al-comprador).
+
+> **La subida no se puede deshacer.** Correr primero en modo prueba.
+
+**Body**
+
+| Campo | Tipo | Obligatorio | Descripción |
+|---|---|---|---|
+| `tlqvCode` | string | Sí | Código de la venta. |
+| `transaccionId` | number | No | ID en Xubio de la factura a enviar. Sin esto se envía la factura vigente que figura en Madre; con esto, esa factura puntual, que tiene que ser de esa venta. Sirve para una factura emitida hace minutos, que Madre todavía no tiene. |
+| `dryRun` | boolean | No | Por defecto `true`: verifica todo y descarga el PDF, sin subirlo. |
+| `force` | boolean | No | Por defecto `false`. Con `true` sube aunque la venta ya tenga una factura en Mercado Libre: es para la factura nueva después de una nota de crédito. |
+
+**Ejemplo — ver qué se enviaría**
+
+```bash
+curl -s -X POST "$INVOICE_API_URL/internal/tlqv-invoice/facturas/send-to-meli" \
+  -H "x-internal-api-key: $INVOICE_INTERNAL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"tlqvCode":"TLQV-22281","dryRun":true}'
+```
+
+**Respuesta**
+
+```json
+{
+  "status": "ready",
+  "tlqvCode": "TLQV-22281",
+  "dryRun": true,
+  "invoice": {
+    "xubioTransactionId": 79915082,
+    "numeroDocumento": "A-00008-00004095",
+    "cae": "86484580124007",
+    "fechaEmision": "2026-11-26T00:00:00.000Z",
+    "importeTotal": 622999
+  },
+  "meliOrderId": "2000019102174568",
+  "meliPackId": "2000015640314189",
+  "pdf": { "fileName": "A-00008-00004095.pdf", "sizeInBytes": 107407 },
+  "blockers": []
+}
+```
+
+| `status` | Significado |
+|---|---|
+| `ready` | Modo prueba: todo en orden, se enviaría esta factura. |
+| `sent` | Subida a Mercado Libre. La respuesta agrega `meliResponse`, con lo que contestó Mercado Libre. |
+| `skipped` | No se envió porque la venta **ya tiene una factura** en Mercado Libre (`MELI_INVOICE_ALREADY_SENT`). |
+| `blocked` | No se puede enviar. El motivo está en `blockers`. |
+
+| Campo | Qué trae |
+|---|---|
+| `invoice` | La factura que se envía: número, CAE e importe. |
+| `meliOrderId` | La orden de Mercado Libre de la venta. |
+| `meliPackId` | Dónde queda guardada en Mercado Libre: el carrito, o la venta misma. |
+| `pdf` | Nombre y tamaño del archivo. |
+
+Los motivos de bloqueo están en [Bloqueos](bloqueos.md#envío-a-mercado-libre).
+
+---
+
 ### Eliminar una factura
 
 ```
@@ -359,6 +541,180 @@ curl -s -X DELETE "$INVOICE_API_URL/internal/tlqv-invoice/facturas/75226596" \
 ```json
 { "transaccionId": 75226596, "deleted": true }
 ```
+
+---
+
+## CAE
+
+Emitir un comprobante y pedir su CAE son pasos separados. Cómo funciona el pedido y qué cuidados tiene está en la [guía funcional](funcional.md#el-cae).
+
+> **Un CAE otorgado no se puede deshacer.** El comprobante queda informado a AFIP y solo se anula con una nota de crédito. Correr primero en modo prueba.
+
+### Pedir el CAE
+
+```
+POST /internal/tlqv-invoice/facturas/cae
+```
+
+Pide el CAE de una factura o de una nota de crédito. Espera la respuesta de AFIP, así que puede tardar varios segundos.
+
+**Body** — se envía `tlqvCode` **o** `transaccionId`, uno de los dos.
+
+| Campo | Tipo | Descripción |
+|---|---|---|
+| `tlqvCode` | string | Código de la venta. Pide el CAE de **todos** sus comprobantes que todavía no lo tengan, del más viejo al más nuevo. |
+| `transaccionId` | number | ID del comprobante en Xubio (el que devuelve la emisión). Pide el CAE de ese solo. |
+| `dryRun` | boolean | Por defecto `true`: muestra qué pediría, sin pedir nada. |
+
+**Ejemplo — ver qué se pediría**
+
+```bash
+curl -s -X POST "$INVOICE_API_URL/internal/tlqv-invoice/facturas/cae" \
+  -H "x-internal-api-key: $INVOICE_INTERNAL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"tlqvCode":"TLQV-22281","dryRun":true}'
+```
+
+**Ejemplo — pedir el CAE de un comprobante**
+
+```bash
+curl -s -X POST "$INVOICE_API_URL/internal/tlqv-invoice/facturas/cae" \
+  -H "x-internal-api-key: $INVOICE_INTERNAL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"transaccionId":79915082,"dryRun":false}'
+```
+
+**Respuesta por `transaccionId`**
+
+```json
+{
+  "status": "authorized",
+  "transaccionId": 79915082,
+  "dryRun": false,
+  "comprobante": {
+    "transaccionId": 79915082,
+    "numeroDocumento": "A-00008-00004095",
+    "tipo": 1,
+    "fecha": "2026-11-26",
+    "importeTotal": 622999,
+    "cliente": "CASA MAINI SRL",
+    "descripcion": "TLQV-22281 ML: 2000019102174568",
+    "cae": "86484580124007",
+    "caeFechaVto": "2026-12-06"
+  },
+  "blockers": []
+}
+```
+
+**Respuesta por `tlqvCode`** — lo mismo, una vez por comprobante, dentro de `results`:
+
+```json
+{
+  "status": "authorized",
+  "tlqvCode": "TLQV-22281",
+  "dryRun": false,
+  "results": [ { "status": "authorized", "transaccionId": 79915082, "comprobante": { "...": "..." }, "blockers": [] } ],
+  "blockers": []
+}
+```
+
+| `status` | Significado |
+|---|---|
+| `ready` | Modo prueba: el comprobante no tiene CAE y se pediría. |
+| `authorized` | AFIP otorgó el CAE. Viene en `comprobante.cae`, con su vencimiento en `caeFechaVto`. |
+| `skipped` | El comprobante **ya tenía CAE** (`ALREADY_HAS_CAE`). No se pidió otro. |
+| `blocked` | No se obtuvo. El motivo está en `blockers`. |
+
+Por `tlqvCode`, el `status` general es el peor de sus comprobantes: `blocked` si alguno lo está; si no, `authorized`; si no, `ready`; y `skipped` solo cuando ninguno necesitaba CAE.
+
+`comprobante.tipo` es `1` para una factura y `3` para una nota de crédito.
+
+Los motivos de bloqueo están en [Bloqueos](bloqueos.md#pedido-de-cae).
+
+---
+
+### Pedir el CAE en lote
+
+```
+POST /internal/tlqv-invoice/facturas/bulk/cae
+```
+
+Encola un pedido de CAE por comprobante y responde enseguida. Se procesan **de a uno y del más viejo al más nuevo**, sin importar el orden en que se envíen.
+
+**Body** — `tlqvCodes`, `transaccionIds`, o los dos.
+
+| Campo | Tipo | Descripción |
+|---|---|---|
+| `tlqvCodes` | string[] | Ventas. Entran al lote todos los comprobantes de cada una. |
+| `transaccionIds` | number[] | Comprobantes sueltos, por su ID de Xubio. |
+| `dryRun` | boolean | Por defecto `true`. |
+
+```bash
+curl -s -X POST "$INVOICE_API_URL/internal/tlqv-invoice/facturas/bulk/cae" \
+  -H "x-internal-api-key: $INVOICE_INTERNAL_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"tlqvCodes":["TLQV-22281","TLQV-22323"],"dryRun":true}'
+```
+
+**Respuesta**
+
+```json
+{
+  "status": "queued",
+  "queueName": "tlqv-invoice-cae-bulk",
+  "batchId": "tlqv-cae-2026-11-27T15-00-00-000Z-a1b2c3d4",
+  "dryRun": true,
+  "totalQueued": 2,
+  "tlqvCodesWithoutComprobante": [],
+  "bullBoardPath": "/admin/queues",
+  "comprobantes": [
+    { "transaccionId": 79862126, "tlqvCode": "TLQV-22323", "numeroDocumento": "A-00008-00004073" },
+    { "transaccionId": 79915082, "tlqvCode": "TLQV-22281", "numeroDocumento": "A-00008-00004095" }
+  ]
+}
+```
+
+| Campo | Qué trae |
+|---|---|
+| `batchId` | Identificador del lote, para consultar su estado. |
+| `comprobantes` | Lo que entró al lote, en el orden en que se va a procesar. |
+| `tlqvCodesWithoutComprobante` | Ventas pedidas que **no tienen comprobantes en Madre** y quedaron afuera. Si se emitieron hace poco, pedirlas por `transaccionIds`. |
+
+Los comprobantes que ya tienen CAE entran al lote y terminan como `skipped`. Si no se puede leer Madre, responde `503` y no encola nada.
+
+---
+
+### Estado de un lote de CAE
+
+```
+GET /internal/tlqv-invoice/facturas/bulk/cae/:batchId
+```
+
+```json
+{
+  "batchId": "tlqv-cae-2026-11-27T15-00-00-000Z-a1b2c3d4",
+  "queueName": "tlqv-invoice-cae-bulk",
+  "found": true,
+  "totalJobs": 2,
+  "counts": { "completed": 2, "failed": 0, "active": 0, "waiting": 0, "delayed": 0, "paused": 0 },
+  "results": { "authorized": 1, "ready": 0, "skipped": 1, "blocked": 0, "failed": 0, "pending": 0 },
+  "jobs": [
+    {
+      "transaccionId": 79862126,
+      "tlqvCode": "TLQV-22323",
+      "state": "completed",
+      "status": "skipped",
+      "numeroDocumento": "A-00008-00004073",
+      "cae": "86474277857526",
+      "caeFechaVto": "2026-12-04",
+      "blockerCodes": ["ALREADY_HAS_CAE"],
+      "message": "El comprobante A-00008-00004073 ya tiene CAE (86474277857526). No se pide otro."
+    }
+  ]
+}
+```
+
+`results.pending` en `0` significa que el lote terminó. Cada trabajo se intenta **una sola vez**; lo que quedó `blocked` se puede volver a pedir, de a uno o en otro lote. Los lotes terminados se van borrando de la cola con el tiempo: el registro permanente es el comprobante en Xubio.
 
 ---
 
@@ -431,7 +787,7 @@ Cuando se emite, la respuesta agrega `createdNotaCredito` y `caeStatus`:
 "caeStatus": { "cae": null, "fiscalmenteEmitido": false, "pendiente": true }
 ```
 
-`pendiente: true` significa que la nota existe en Xubio pero todavía no tiene CAE. Hay que pedirlo a mano.
+`pendiente: true` significa que la nota existe en Xubio pero todavía no tiene CAE. Hay que pedirlo: en Xubio, o con el [pedido de CAE](#cae).
 
 **Antes de emitir**, conviene revisar en la respuesta de prueba que `cancelledInvoice` sea la factura correcta y que la suma de los `items` dé el `importeTotal`.
 

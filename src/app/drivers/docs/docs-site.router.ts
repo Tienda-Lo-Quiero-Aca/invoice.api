@@ -48,6 +48,11 @@ export const DOCS_PAGES: readonly DocsPage[] = [
   { group: 'Facturación', title: 'Bloqueos', file: 'docs/bloqueos.md' },
   { group: 'API', title: 'Referencia de la API', file: 'docs/api.md' },
   {
+    group: 'API',
+    title: 'Guía para el front: entrega en el día',
+    file: 'docs/front-entrega-en-el-dia.md',
+  },
+  {
     group: 'Técnico',
     title: 'Arquitectura y configuración',
     file: 'docs/tecnico.md',

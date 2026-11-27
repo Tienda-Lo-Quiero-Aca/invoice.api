@@ -576,9 +576,13 @@ function getFinalSyncRunStatus(
   return 'completed';
 }
 
-function mapToMadreComprobante(
-  syncRunId: number,
-  summary: XubioComprobanteSummary,
+/**
+ * A Xubio comprobante as Madre stores it. Outside a backfill run there is no
+ * sync run nor list row to attach, and both are left out.
+ */
+export function mapToMadreComprobante(
+  syncRunId: number | null,
+  summary: Pick<XubioComprobanteSummary, 'rawPayload'> | null,
   detail: XubioComprobanteDetail,
 ): MadreXubioComprobante {
   const tlqv = extractTlqv(detail.descripcion);
@@ -632,7 +636,7 @@ function mapToMadreComprobante(
     cae: detail.cae ?? detail.CAE,
     caeFechaVencimiento: formatCaeDate(detail.caefechaVto),
     fiscalmenteEmitido: hasCae(detail),
-    rawListPayload: summary.rawPayload,
+    rawListPayload: summary?.rawPayload,
     rawDetailPayload: detail.rawPayload,
     productItems: detail.transaccionProductoItems.map((item) => ({
       transaccionCvItemId: item.transaccionCVItemId,

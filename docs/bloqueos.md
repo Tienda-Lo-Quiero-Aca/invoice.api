@@ -18,6 +18,8 @@ etapa | CÓDIGO: explicación
 - [Etapa factura](#etapa-factura)
 - [Ventas con entrega en el día](#ventas-con-entrega-en-el-día)
 - [Notas de crédito](#notas-de-crédito)
+- [Envío a Mercado Libre](#envío-a-mercado-libre)
+- [Pedido de CAE](#pedido-de-cae)
 - [Consumidor final desde un issue](#consumidor-final-desde-un-issue)
 - [Cuáles se reintentan solos](#cuáles-se-reintentan-solos)
 
@@ -191,7 +193,7 @@ Se mandó la factura a Xubio y **no hubo respuesta**: se cortó la conexión, ve
 
 **Qué hacer:** **entrar a Xubio y buscar si la factura de ese TLQV existe, antes de reintentar.**
 
-- Si existe: no hacer nada más. En la próxima sincronización aparecerá en Madre.
+- Si existe: no hacer nada más. En la próxima sincronización aparecerá en Madre. Hasta entonces no volver a facturar esa venta: el control de duplicados todavía no la ve.
 - Si no existe: reintentar.
 
 Si se reintenta sin mirar y la factura sí existía, quedan dos facturas con CAE para la misma venta, y una hay que anularla con nota de crédito. Por eso este caso **nunca se reintenta solo**.
@@ -270,13 +272,33 @@ La orden no está en pesos, o su importe es cero. Son controles de seguridad; no
 
 ---
 
+### `XUBIO_TRANSACCION_ID_MISSING`
+
+Solo en el [proceso completo en lote](funcional.md#todo-de-una-vez-en-lote). Xubio emitió la factura pero no informó cuál es, y sin eso no se puede seguir con el CAE.
+
+**Qué hacer:** buscar la factura en Xubio y seguir a mano: [pedir el CAE](api.md#cae) y [enviarla](api.md#enviar-la-factura-a-mercado-libre).
+
+### Bloqueos del proceso completo en lote
+
+El [proceso completo](funcional.md#todo-de-una-vez-en-lote) no tiene bloqueos propios: usa los de cada etapa. El resultado dice en cuál se detuvo.
+
+| Se detuvo en | Bloqueos posibles |
+|---|---|
+| `invoice` | Los de esta sección y los de la [etapa cliente](#etapa-cliente). |
+| `cae` | Los de [pedido de CAE](#pedido-de-cae). |
+| `meli` | Los de [envío a Mercado Libre](#envío-a-mercado-libre). |
+
+En los tres casos, una vez resuelto el motivo, se vuelve a mandar la venta al lote y sigue desde donde quedó.
+
+---
+
 ## Notas de crédito
 
 ### `NO_LIVE_INVOICE`
 
 El TLQV no tiene facturas en Madre.
 
-**Qué hacer:** si la factura se emitió hace poco, puede que Madre todavía no la tenga: esperar a la próxima sincronización (cada 2 horas) o correr un [backfill](api.md#backfill-de-comprobantes-en-cola).
+**Qué hacer:** las facturas que emite el bot se copian a Madre en el momento. Si esta se cargó a mano en Xubio hace poco, puede que Madre todavía no la tenga: esperar a la próxima sincronización (cada 2 horas) o correr un [backfill](api.md#backfill-de-comprobantes-en-cola).
 
 ### `ALREADY_CANCELLED`
 
@@ -310,6 +332,102 @@ Xubio rechazó la nota de crédito, o no respondió.
 
 ---
 
+## Envío a Mercado Libre
+
+Propios de [enviar la factura al comprador](funcional.md#enviar-la-factura-al-comprador).
+
+### `INVOICE_WITHOUT_CAE`
+
+La factura todavía no tiene CAE en Xubio. Sin CAE no es válida para el cliente, y no se envía.
+
+**Qué hacer:** [pedir el CAE](api.md#cae) y reintentar.
+
+### `COMPROBANTE_NOT_AN_INVOICE` · `COMPROBANTE_TLQV_MISMATCH`
+
+Solo cuando se pide enviar una factura puntual por su ID de Xubio. El comprobante indicado no es una factura, o su descripción en Xubio no nombra a esa venta. No se envía, para no mandarle al comprador una nota de crédito o la factura de otro.
+
+**Qué hacer:** revisar el ID.
+
+### `MELI_INVOICE_ALREADY_SENT`
+
+La venta ya tiene una factura cargada en Mercado Libre. La respuesta sale como `skipped` y no se sube otra.
+
+**Qué hacer:** nada, si es la misma factura. Si es una factura nueva —después de una nota de crédito—, reenviar con `force: true`.
+
+### `NO_LIVE_INVOICE` (en este proceso)
+
+La venta no tiene una factura vigente: o no tiene ninguna en Madre, o todas están anuladas por nota de crédito. El mensaje dice cuál de las dos.
+
+**Qué hacer:** si la factura se cargó a mano en Xubio hace poco, esperar a la próxima sincronización (cada 2 horas) o correr un [backfill](api.md#backfill-de-comprobantes-en-cola); las que emite el bot ya están en Madre. Si está anulada, primero hay que emitir la factura nueva.
+
+### `MELI_ORDER_NOT_LINKED` (en este proceso)
+
+La venta no tiene una orden de Mercado Libre en Ops. No hay adónde enviar la factura.
+
+**Qué hacer:** nada, si la venta no es de Mercado Libre.
+
+### `MELI_INVOICE_UPLOAD_FAILED`
+
+Mercado Libre no aceptó la factura, o no respondió. El mensaje trae lo que contestó.
+
+**Qué hacer:** reintentar. A diferencia de la emisión de facturas, acá reintentar es seguro: si la subida había llegado a hacerse, el reintento lo detecta y no la duplica. Si se repite, revisar el detalle del mensaje.
+
+### `INVOICE_PDF_UNAVAILABLE` · `INVOICE_PDF_TOO_LARGE`
+
+No se pudo descargar el PDF de Xubio, lo que bajó no es un PDF, o pesa más de lo que acepta Mercado Libre (10 MB).
+
+**Qué hacer:** reintentar. Si persiste, probar imprimir la factura desde Xubio para ver si el problema está ahí.
+
+### `XUBIO_COMPROBANTE_LOOKUP_FAILED` · `MELI_INVOICE_STATUS_LOOKUP_FAILED` · `COMPROBANTES_LOOKUP_FAILED` · `ORDER_DETAILS_LOOKUP_FAILED`
+
+No se pudo consultar Xubio, Mercado Libre, Madre u Ops. No se envía nada sin poder verificar.
+
+**Qué hacer:** reintentar.
+
+---
+
+## Pedido de CAE
+
+Propios de [pedir el CAE](funcional.md#el-cae). No se guardan como issue: el comprobante sigue sin CAE en Xubio, y eso es lo que queda a la vista.
+
+### `ALREADY_HAS_CAE`
+
+El comprobante ya tiene CAE. La respuesta sale como `skipped` y no se pide otro.
+
+**Qué hacer:** nada.
+
+### `CAE_REJECTED`
+
+AFIP o Xubio no otorgaron el CAE. El mensaje trae el motivo tal como lo informó Xubio.
+
+**Qué hacer:** leer el motivo. Los más comunes:
+
+- **Hay un comprobante anterior de la misma numeración sin CAE.** Pedir primero el de ese.
+- **Los datos del cliente no coinciden con AFIP.** Pasa si se editó la ficha del cliente después de emitir. Revisar la ficha en Xubio.
+- **La fecha del comprobante quedó fuera del plazo** que AFIP admite para autorizarlo.
+
+Una vez corregido, volver a pedirlo.
+
+### `CAE_REQUEST_OUTCOME_UNKNOWN`
+
+Xubio no respondió al pedido, o no se pudo volver a leer el comprobante para confirmar el resultado.
+
+**Qué hacer:** volver a pedirlo. Es seguro: antes de pedir se verifica que el comprobante no tenga CAE, así que si AFIP ya lo había otorgado, la respuesta sale `skipped` con el CAE.
+
+### `NO_COMPROBANTE`
+
+La venta no tiene comprobantes en Madre.
+
+**Qué hacer:** verificar el código. Si el comprobante se cargó a mano en Xubio hace poco, pedir el CAE con su `transaccionId` o esperar a la próxima sincronización (cada 2 horas).
+
+### `XUBIO_COMPROBANTE_LOOKUP_FAILED` · `COMPROBANTES_LOOKUP_FAILED` (en este proceso)
+
+No se pudo leer el comprobante en Xubio, o los comprobantes de la venta en Madre. No se le pide nada a AFIP sin poder verificar antes.
+
+**Qué hacer:** reintentar.
+
+---
+
 ## Consumidor final desde un issue
 
 Solo aparecen en [crear un consumidor final desde un issue](api.md#crear-un-consumidor-final-desde-un-issue).
@@ -334,6 +452,6 @@ Al facturar **en lote**, estos bloqueos se reintentan hasta 3 veces, con 30 segu
 | `FISCAL_INFO_UNAVAILABLE` | Solo se consulta AFIP. |
 | `SPREADSHEET_SOURCE_DATA_UNAVAILABLE` | Solo se lee la planilla. |
 
-Todos los demás quedan bloqueados para que alguien los revise. En particular, **nada que haya llegado a enviar un comprobante a Xubio se reintenta solo**.
+Todos los demás quedan bloqueados para que alguien los revise. En particular, **nada que haya llegado a enviar un comprobante a Xubio se reintenta solo**, y el pedido de CAE tampoco: se intenta una vez y, si no sale, se vuelve a pedir a mano.
 
 Al facturar **de a una** no hay reintento del flujo, pero las lecturas de planilla y de Xubio se reintentan internamente.

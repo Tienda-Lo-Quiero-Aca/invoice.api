@@ -9,6 +9,7 @@ import type {
   XubioInvoice,
   XubioInvoiceItem,
 } from '../../../entities/xubio/facturas/XubioInvoice';
+import { selectLiveInvoices } from './selectLiveInvoices';
 
 export type CreateNotaCreditoStatus = 'created' | 'skipped' | 'blocked';
 
@@ -105,11 +106,7 @@ export class CreateNotaCreditoFromTlqvInteractor {
       });
     }
 
-    const facturas = comprobantes.filter((item) => !isCreditNote(item));
-    const cancelledIds = readCancelledTransactionIds(comprobantes);
-    const live = facturas.filter(
-      (factura) => !cancelledIds.has(factura.xubioTransactionId),
-    );
+    const { facturas, live } = selectLiveInvoices(comprobantes);
 
     if (facturas.length === 0) {
       return blocked(tlqvCode, dryRun, {
@@ -134,9 +131,7 @@ export class CreateNotaCreditoFromTlqvInteractor {
 
     // Newest first: if several are live, the last one issued is the one being
     // corrected.
-    const factura = [...live].sort((left, right) =>
-      String(right.fechaEmision).localeCompare(String(left.fechaEmision)),
-    )[0];
+    const factura = live[0];
 
     const build = buildNotaCredito({
       factura,
@@ -392,33 +387,6 @@ function readItemDescription(item: MadreXubioProductItem): string {
 
 function normalizeLetter(value: string | null | undefined): 'A' | 'B' {
   return String(value ?? '').toUpperCase() === 'A' ? 'A' : 'B';
-}
-
-function isCreditNote(item: MadreXubioComprobante): boolean {
-  return item.documentKind === 'CREDIT_NOTE';
-}
-
-function readCancelledTransactionIds(
-  comprobantes: MadreXubioComprobante[],
-): Set<number> {
-  const ids = new Set<number>();
-  for (const comprobante of comprobantes) {
-    if (!isCreditNote(comprobante)) {
-      continue;
-    }
-
-    const payload = comprobante.rawDetailPayload;
-    if (typeof payload !== 'object' || payload === null) {
-      continue;
-    }
-
-    const value = (payload as Record<string, unknown>).comprobante;
-    if (typeof value === 'number' && Number.isInteger(value) && value > 0) {
-      ids.add(value);
-    }
-  }
-
-  return ids;
 }
 
 function blocked(

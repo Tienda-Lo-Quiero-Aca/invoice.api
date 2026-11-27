@@ -9,6 +9,9 @@ Recibe un código de venta (`TLQV-22281`), verifica que se pueda facturar, encue
 | | |
 |---|---|
 | **Facturas** | Emite facturas A o B en Xubio a partir de un TLQV, de a una o en lote. Dos procesos: desde la planilla, o desde la orden de Mercado Libre para las ventas con entrega en el día. |
+| **Entrega en el día, todo de una vez** | Para esas ventas, un lote que factura, pide el CAE y envía la factura a Mercado Libre, venta por venta. |
+| **CAE** | Le pide a AFIP el CAE de un comprobante ya emitido, de a uno o en lote, y confirma el resultado contra Xubio. |
+| **Envío al comprador** | Adjunta el PDF de la factura, ya con CAE, a la venta en Mercado Libre. |
 | **Notas de crédito** | Anula una factura ya emitida copiando sus conceptos tal como se facturaron. |
 | **Clientes** | Busca al comprador en Xubio y, si no existe, lo crea con los datos fiscales de AFIP/ARCA. |
 | **Control de duplicados** | Mantiene en Madre una copia de los comprobantes de Xubio para no facturar dos veces la misma venta. |
@@ -30,7 +33,7 @@ flowchart TD
     G --> H{¿El total coincide con<br/>'Precio final'?}
     H -- No --> X4[Bloquea: INVOICE_TOTAL_SALE_PRICE_MISMATCH]
     H -- Sí --> I[Emite la factura en Xubio]
-    I --> J([Queda sin CAE:<br/>se pide a mano en Xubio])
+    I --> J([Queda sin CAE:<br/>se pide aparte])
 ```
 
 El detalle de cada paso está en la [guía funcional](docs/funcional.md).
@@ -87,6 +90,7 @@ Para emitirla de verdad, el mismo llamado con `"dryRun": false`.
 | Documento | Qué explica |
 |---|---|
 | [Referencia de la API](docs/api.md) | Todos los endpoints: facturas, notas de crédito, clientes, consulta fiscal, comprobantes e issues, con ejemplos. |
+| [Guía para el front: entrega en el día](docs/front-entrega-en-el-dia.md) | Cómo armar en el panel la pantalla que factura desde la orden de Mercado Libre: flujo, qué mostrar, y qué hacer con cada bloqueo. |
 
 **Técnico**
 

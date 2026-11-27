@@ -488,7 +488,7 @@ function buildJobResult(
   };
 }
 
-function normalizeUniqueTlqvCodes(values: string[]): {
+export function normalizeUniqueTlqvCodes(values: string[]): {
   unique: string[];
   totalRequested: number;
   totalDuplicated: number;

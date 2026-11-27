@@ -140,6 +140,7 @@ describe('docs site', () => {
         '  - [Bloqueos](/docs/bloqueos.md)',
         '- **API**',
         '  - [Referencia de la API](/docs/api.md)',
+        '  - [Guía para el front: entrega en el día](/docs/front-entrega-en-el-dia.md)',
         '- **Técnico**',
         '  - [Arquitectura y configuración](/docs/tecnico.md)',
         '  - [Operación](/docs/operacion.md)',

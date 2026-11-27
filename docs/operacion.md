@@ -172,14 +172,14 @@ cd /opt/invoice.api && cp .env .env.backup && grep -v '^XUBIO_BASIC_AUTHORIZATIO
 Bloqueo `XUBIO_INVOICE_OUTCOME_UNKNOWN`. **No reintentar a ciegas.**
 
 1. Buscar en Xubio si existe una factura con ese TLQV en la descripción.
-2. Si existe, no hacer nada: Madre la va a tomar en la próxima sincronización.
+2. Si existe, no volver a facturar: Madre la va a tomar en la próxima sincronización.
 3. Si no existe, reintentar.
 
 Reintentar sin mirar puede dejar dos facturas con CAE para la misma venta.
 
 ### Una venta ya facturada no aparece como facturada
 
-**Causa:** Madre todavía no tiene el comprobante. La sincronización corre cada 2 horas.
+**Causa:** Madre todavía no tiene el comprobante. Lo que emite el bot se copia en el momento; pasa con lo cargado a mano en Xubio, o si esa copia falló (la respuesta lo avisa con `madreSync: failed`). La sincronización general corre cada 2 horas.
 
 **Solución:** esperar, o forzarla para el día en cuestión:
 

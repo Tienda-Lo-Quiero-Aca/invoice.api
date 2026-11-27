@@ -6,6 +6,8 @@ import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { createDocsSiteRouter } from './app/drivers/docs/docs-site.router';
 import { AppModule } from './app/modules/app.module';
+import { TlqvInvoiceCaeBulkQueueService } from './app/services/tlqv-invoice-cae-bulk-queue.service';
+import { TlqvInvoiceEntregaEnElDiaBulkQueueService } from './app/services/tlqv-invoice-entrega-en-el-dia-bulk-queue.service';
 import { TlqvInvoiceFacturasBulkQueueService } from './app/services/tlqv-invoice-facturas-bulk-queue.service';
 import { TlqvInvoiceNotaCreditoBulkQueueService } from './app/services/tlqv-invoice-nota-credito-bulk-queue.service';
 import { XubioComprobantesBackfillQueueService } from './app/services/xubio-comprobantes-backfill-queue.service';
@@ -82,6 +84,12 @@ async function bootstrap() {
     const tlqvInvoiceNotaCreditoBulkQueueService = app.get(
       TlqvInvoiceNotaCreditoBulkQueueService,
     );
+    const tlqvInvoiceCaeBulkQueueService = app.get(
+      TlqvInvoiceCaeBulkQueueService,
+    );
+    const tlqvInvoiceEntregaEnElDiaBulkQueueService = app.get(
+      TlqvInvoiceEntregaEnElDiaBulkQueueService,
+    );
 
     serverAdapter.setBasePath(basePath);
     createBullBoard({
@@ -89,6 +97,8 @@ async function bootstrap() {
         new BullMQAdapter(backfillQueueService.getQueue()),
         new BullMQAdapter(tlqvInvoiceFacturasBulkQueueService.getQueue()),
         new BullMQAdapter(tlqvInvoiceNotaCreditoBulkQueueService.getQueue()),
+        new BullMQAdapter(tlqvInvoiceCaeBulkQueueService.getQueue()),
+        new BullMQAdapter(tlqvInvoiceEntregaEnElDiaBulkQueueService.getQueue()),
       ],
       serverAdapter,
     });

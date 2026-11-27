@@ -2,6 +2,7 @@ import type { Provider } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GetCostosOperacionesByTlqvCodeRepository } from '../../../../core/driver/repository/spreadsheet-api/costos-operaciones/GetCostosOperacionesByTlqvCodeRepository';
 import { GetMeliOrderDetailRepository } from '../../../../core/driver/repository/mercadolibre-api/orders/GetMeliOrderDetailRepository';
+import { MeliOrderInvoiceRepository } from '../../../../core/driver/repository/mercadolibre-api/orders/MeliOrderInvoiceRepository';
 import { GetMadreItemByTlqvCodeRepository } from '../../../../core/driver/repository/spreadsheet-api/madre/GetMadreItemByTlqvCodeRepository';
 import { GetStockBueItemByTlqvCodeRepository } from '../../../../core/driver/repository/spreadsheet-api/stock-bue/GetStockBueItemByTlqvCodeRepository';
 import { GetTlqvItemByCodeRepository } from '../../../../core/driver/repository/spreadsheet-api/tlqv/GetTlqvItemByCodeRepository';
@@ -10,8 +11,12 @@ import {
   type ICreateXubioClienteFromTlqvUseCase,
 } from '../../../../core/interactors/tlqv-invoice/facturas/CreateTlqvInvoiceFlowInteractor';
 import { CreateXubioClienteFromTlqvInteractor } from '../../../../core/interactors/tlqv-invoice/clientes/CreateXubioClienteFromTlqvInteractor';
+import { CompleteMeliOrderSaleInteractor } from '../../../../core/interactors/tlqv-invoice/facturas/CompleteMeliOrderSaleInteractor';
 import { CreateMeliOrderInvoiceFlowInteractor } from '../../../../core/interactors/tlqv-invoice/facturas/CreateMeliOrderInvoiceFlowInteractor';
 import { CreateNotaCreditoFromTlqvInteractor } from '../../../../core/interactors/tlqv-invoice/facturas/CreateNotaCreditoFromTlqvInteractor';
+import { RequestCaeInteractor } from '../../../../core/interactors/tlqv-invoice/facturas/RequestCaeInteractor';
+import { SendInvoiceToMeliInteractor } from '../../../../core/interactors/tlqv-invoice/facturas/SendInvoiceToMeliInteractor';
+import { SyncXubioComprobanteToMadreInteractor } from '../../../../core/interactors/xubio/comprobantes/SyncXubioComprobanteToMadreInteractor';
 import { DeleteXubioInvoiceInteractor } from '../../../../core/interactors/xubio/facturas/DeleteXubioInvoiceInteractor';
 import {
   createMadreInvoiceClientIssuesRepository,
@@ -24,6 +29,9 @@ import {
 import {
   createXubioCreateInvoiceRepository,
   createXubioDeleteInvoiceRepository,
+  createXubioGetComprobanteDetailRepository,
+  createXubioGetInvoicePdfRepository,
+  createXubioRequestCaeRepository,
 } from '../../xubio/shared/xubio-factura-repository.factory';
 import {
   createXubioCreateClienteRepository,
@@ -46,6 +54,16 @@ export const CREATE_NOTA_CREDITO_FROM_TLQV_INTERACTOR = Symbol(
 );
 export const CREATE_MELI_ORDER_INVOICE_FLOW_INTERACTOR = Symbol(
   'CREATE_MELI_ORDER_INVOICE_FLOW_INTERACTOR',
+);
+export const SEND_INVOICE_TO_MELI_INTERACTOR = Symbol(
+  'SEND_INVOICE_TO_MELI_INTERACTOR',
+);
+export const REQUEST_CAE_INTERACTOR = Symbol('REQUEST_CAE_INTERACTOR');
+export const SYNC_XUBIO_COMPROBANTE_TO_MADRE_INTERACTOR = Symbol(
+  'SYNC_XUBIO_COMPROBANTE_TO_MADRE_INTERACTOR',
+);
+export const COMPLETE_MELI_ORDER_SALE_INTERACTOR = Symbol(
+  'COMPLETE_MELI_ORDER_SALE_INTERACTOR',
 );
 
 export const tlqvInvoiceFacturasInteractorProviders: Provider[] = [
@@ -176,6 +194,73 @@ export const tlqvInvoiceFacturasInteractorProviders: Provider[] = [
         createXubioCreateInvoiceRepository(configService),
       );
     },
+  },
+  {
+    provide: SEND_INVOICE_TO_MELI_INTERACTOR,
+    inject: [ConfigService],
+    useFactory: (configService: ConfigService) =>
+      new SendInvoiceToMeliInteractor(
+        createMadreXubioComprobantesRepository(configService),
+        createXubioGetComprobanteDetailRepository(configService),
+        createOpsApiOrderDetailsRepository(configService),
+        createXubioGetInvoicePdfRepository(configService),
+        new MeliOrderInvoiceRepository({
+          baseUrl: readOptionalConfig(configService, 'MELI_API_BASE_URL'),
+          internalApiKey: readOptionalConfig(
+            configService,
+            'MELI_API_INTERNAL_API_KEY',
+          ),
+          timeoutInMilliseconds: readNumberConfig(
+            configService,
+            'MELI_API_UPLOAD_TIMEOUT_MS',
+            60_000,
+          ),
+        }),
+      ),
+  },
+  {
+    provide: REQUEST_CAE_INTERACTOR,
+    inject: [ConfigService],
+    useFactory: (configService: ConfigService) =>
+      new RequestCaeInteractor(
+        createXubioGetComprobanteDetailRepository(configService),
+        createXubioRequestCaeRepository(configService),
+        createMadreXubioComprobantesRepository(configService),
+      ),
+  },
+  {
+    // The three stages are the very use cases their own endpoints run.
+    provide: COMPLETE_MELI_ORDER_SALE_INTERACTOR,
+    inject: [
+      CREATE_MELI_ORDER_INVOICE_FLOW_INTERACTOR,
+      REQUEST_CAE_INTERACTOR,
+      SEND_INVOICE_TO_MELI_INTERACTOR,
+      SYNC_XUBIO_COMPROBANTE_TO_MADRE_INTERACTOR,
+      ConfigService,
+    ],
+    useFactory: (
+      createInvoice: CreateMeliOrderInvoiceFlowInteractor,
+      requestCae: RequestCaeInteractor,
+      sendInvoiceToMeli: SendInvoiceToMeliInteractor,
+      syncComprobanteToMadre: SyncXubioComprobanteToMadreInteractor,
+      configService: ConfigService,
+    ) =>
+      new CompleteMeliOrderSaleInteractor(
+        createInvoice,
+        requestCae,
+        sendInvoiceToMeli,
+        syncComprobanteToMadre,
+        createMadreXubioComprobantesRepository(configService),
+      ),
+  },
+  {
+    provide: SYNC_XUBIO_COMPROBANTE_TO_MADRE_INTERACTOR,
+    inject: [ConfigService],
+    useFactory: (configService: ConfigService) =>
+      new SyncXubioComprobanteToMadreInteractor(
+        createXubioGetComprobanteDetailRepository(configService),
+        createMadreXubioComprobantesRepository(configService),
+      ),
   },
   {
     provide: CREATE_NOTA_CREDITO_FROM_TLQV_INTERACTOR,

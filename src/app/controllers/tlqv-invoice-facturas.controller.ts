@@ -22,6 +22,8 @@ import {
 } from '../../core/interactors/tlqv-invoice/facturas/CreateTlqvInvoiceFlowInteractor';
 import { InternalApiKeyGuard } from '../guards/internal-api-key.guard';
 import { ApiInternalEndpoint } from '../modules/shared/swagger/internal-api-docs.decorators';
+import { TlqvInvoiceCaeBulkQueueService } from '../services/tlqv-invoice-cae-bulk-queue.service';
+import { TlqvInvoiceEntregaEnElDiaBulkQueueService } from '../services/tlqv-invoice-entrega-en-el-dia-bulk-queue.service';
 import { TlqvInvoiceFacturasBulkQueueService } from '../services/tlqv-invoice-facturas-bulk-queue.service';
 import { TlqvInvoiceNotaCreditoBulkQueueService } from '../services/tlqv-invoice-nota-credito-bulk-queue.service';
 import { TlqvInvoiceFacturasService } from '../services/tlqv-invoice-facturas.service';
@@ -34,6 +36,8 @@ export class TlqvInvoiceFacturasController {
     private readonly tlqvInvoiceFacturasService: TlqvInvoiceFacturasService,
     private readonly tlqvInvoiceFacturasBulkQueueService: TlqvInvoiceFacturasBulkQueueService,
     private readonly tlqvInvoiceNotaCreditoBulkQueueService: TlqvInvoiceNotaCreditoBulkQueueService,
+    private readonly tlqvInvoiceCaeBulkQueueService: TlqvInvoiceCaeBulkQueueService,
+    private readonly tlqvInvoiceEntregaEnElDiaBulkQueueService: TlqvInvoiceEntregaEnElDiaBulkQueueService,
   ) {}
 
   @ApiInternalEndpoint()
@@ -208,6 +212,77 @@ export class TlqvInvoiceFacturasController {
 
   @ApiInternalEndpoint()
   @ApiOperation({
+    summary: 'Enviar la factura de un TLQV al comprador por Mercado Libre',
+    description: [
+      'Toma la factura vigente del TLQV, verifica en Xubio que ya tenga CAE,',
+      'descarga su PDF y lo adjunta a la venta de Mercado Libre, donde lo ve',
+      'el comprador. No envía una factura sin CAE ni una anulada por nota de',
+      'crédito, y no la envía dos veces: si Mercado Libre ya tiene una, la',
+      'saltea salvo que se indique force=true. dryRun=true (por defecto) hace',
+      'todas las verificaciones y descarga el PDF, sin subirlo. La subida no',
+      'se puede deshacer.',
+    ].join(' '),
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['tlqvCode'],
+      properties: {
+        tlqvCode: { type: 'string', example: 'TLQV-19989' },
+        dryRun: {
+          type: 'boolean',
+          default: true,
+          description: 'Para subir la factura de verdad enviar false.',
+        },
+        force: {
+          type: 'boolean',
+          default: false,
+          description:
+            'Subir aunque la venta ya tenga una factura en Mercado Libre: la factura nueva después de una nota de crédito.',
+        },
+      },
+      example: { tlqvCode: 'TLQV-19989', dryRun: true },
+    },
+  })
+  @ApiOkResponse({
+    description: 'Enviada, lista para enviar, salteada o bloqueada.',
+    schema: {
+      example: {
+        status: 'ready',
+        tlqvCode: 'TLQV-19989',
+        dryRun: true,
+        invoice: {
+          xubioTransactionId: 77777299,
+          numeroDocumento: 'B-00008-00003981',
+          cae: '86395384692268',
+          fechaEmision: '2026-09-30',
+          importeTotal: 910628.23,
+        },
+        meliOrderId: '2000018498993478',
+        meliPackId: '2000018498993478',
+        pdf: { fileName: 'B-00008-00003981.pdf', sizeInBytes: 107461 },
+        blockers: [],
+      },
+    },
+  })
+  @Post('send-to-meli')
+  sendInvoiceToMeli(
+    @Body()
+    body: {
+      tlqvCode?: string;
+      dryRun?: boolean;
+      force?: boolean;
+    } = {},
+  ) {
+    return this.tlqvInvoiceFacturasService.sendInvoiceToMeli({
+      tlqvCode: readRequiredBodyString(body.tlqvCode, 'tlqvCode'),
+      dryRun: readOptionalBoolean(body.dryRun, 'dryRun'),
+      force: readOptionalBoolean(body.force, 'force'),
+    });
+  }
+
+  @ApiInternalEndpoint()
+  @ApiOperation({
     summary: 'Emitir nota de crédito que anula la factura vigente de un TLQV',
     description: [
       'Lee la factura vigente del TLQV en Madre y emite una nota de crédito',
@@ -311,6 +386,244 @@ export class TlqvInvoiceFacturasController {
   @Get('bulk/nota-credito/:batchId')
   getNotaCreditoBatchStatus(@Param('batchId') batchId: string) {
     return this.tlqvInvoiceNotaCreditoBulkQueueService.getBatchStatus(
+      readRequiredBodyString(batchId, 'batchId'),
+    );
+  }
+
+  @ApiInternalEndpoint()
+  @ApiOperation({
+    summary: 'Pedir el CAE de un comprobante',
+    description: [
+      'Le pide a AFIP, a través de Xubio, el CAE de una factura o de una nota',
+      'de crédito. Se indica el TLQV (pide el de todos sus comprobantes que',
+      'todavía no lo tengan, del más viejo al más nuevo) o el ID del',
+      'comprobante en Xubio (transaccionId), uno de los dos. Un comprobante',
+      'que ya tiene CAE se saltea. dryRun=true (por defecto) solo muestra qué',
+      'pediría. Un CAE otorgado no se puede deshacer: el comprobante solo se',
+      'anula con una nota de crédito.',
+    ].join(' '),
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        tlqvCode: { type: 'string', example: 'TLQV-22281' },
+        transaccionId: {
+          type: 'integer',
+          example: 79915082,
+          description: 'ID del comprobante en Xubio. Alternativa a tlqvCode.',
+        },
+        dryRun: {
+          type: 'boolean',
+          default: true,
+          description: 'Para pedir el CAE de verdad enviar false.',
+        },
+      },
+      example: { tlqvCode: 'TLQV-22281', dryRun: true },
+    },
+  })
+  @ApiOkResponse({
+    description: 'CAE otorgado, listo para pedir, salteado o bloqueado.',
+    schema: {
+      example: {
+        status: 'authorized',
+        tlqvCode: 'TLQV-22281',
+        dryRun: false,
+        results: [
+          {
+            status: 'authorized',
+            transaccionId: 79915082,
+            dryRun: false,
+            comprobante: {
+              transaccionId: 79915082,
+              numeroDocumento: 'A-00008-00004095',
+              tipo: 1,
+              fecha: '2026-11-26',
+              importeTotal: 622999,
+              cliente: 'CASA MAINI SRL',
+              descripcion: 'TLQV-22281 ML: 2000019102174568',
+              cae: '86484580124007',
+              caeFechaVto: '2026-12-06',
+            },
+            blockers: [],
+          },
+        ],
+        blockers: [],
+      },
+    },
+  })
+  @Post('cae')
+  requestCae(
+    @Body()
+    body: {
+      tlqvCode?: string;
+      transaccionId?: unknown;
+      dryRun?: boolean;
+    } = {},
+  ) {
+    const tlqvCode = readOptionalBodyString(body.tlqvCode);
+    const dryRun = readOptionalBoolean(body.dryRun, 'dryRun');
+
+    if ((tlqvCode === undefined) === (body.transaccionId === undefined)) {
+      throw new BadRequestException(
+        'Send either tlqvCode or transaccionId, exactly one of them',
+      );
+    }
+
+    if (tlqvCode !== undefined) {
+      return this.tlqvInvoiceFacturasService.requestCaeForTlqv({
+        tlqvCode,
+        dryRun,
+      });
+    }
+
+    return this.tlqvInvoiceFacturasService.requestCae({
+      transaccionId: readPositiveIntegerValue(
+        body.transaccionId,
+        'transaccionId',
+      ),
+      dryRun,
+    });
+  }
+
+  @ApiInternalEndpoint()
+  @ApiOperation({
+    summary: 'Pedir el CAE de varios comprobantes',
+    description: [
+      'Encola un pedido de CAE por comprobante. Acepta TLQVs (toma todos sus',
+      'comprobantes), IDs de comprobante de Xubio, o las dos cosas. Se',
+      'procesan de a uno y del más viejo al más nuevo, que es el orden en que',
+      'AFIP autoriza cada numeración. Los que ya tienen CAE se saltean.',
+      'dryRun=true (por defecto) no pide nada. El avance se sigue por Bull',
+      'Board o por GET bulk/cae/:batchId.',
+    ].join(' '),
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        tlqvCodes: {
+          type: 'array',
+          items: { type: 'string' },
+          example: ['TLQV-22281', 'TLQV-22323'],
+        },
+        transaccionIds: {
+          type: 'array',
+          items: { type: 'integer' },
+          example: [79915082],
+        },
+        dryRun: { type: 'boolean', default: true },
+      },
+      example: { tlqvCodes: ['TLQV-22281', 'TLQV-22323'], dryRun: true },
+    },
+  })
+  @Post('bulk/cae')
+  enqueueCaeBulk(
+    @Body()
+    body: {
+      tlqvCodes?: unknown;
+      transaccionIds?: unknown;
+      dryRun?: boolean;
+    } = {},
+  ) {
+    const tlqvCodes =
+      body.tlqvCodes === undefined ? [] : readRequiredTlqvCodes(body.tlqvCodes);
+    const transaccionIds =
+      body.transaccionIds === undefined
+        ? []
+        : readPositiveIntegerList(body.transaccionIds, 'transaccionIds');
+
+    if (tlqvCodes.length === 0 && transaccionIds.length === 0) {
+      throw new BadRequestException(
+        'Send tlqvCodes, transaccionIds, or both, with at least one item',
+      );
+    }
+
+    return this.tlqvInvoiceCaeBulkQueueService.enqueueBulk({
+      tlqvCodes,
+      transaccionIds,
+      dryRun: readOptionalBoolean(body.dryRun, 'dryRun'),
+    });
+  }
+
+  @ApiInternalEndpoint()
+  @ApiOperation({ summary: 'Estado de un batch de pedido de CAE' })
+  @Get('bulk/cae/:batchId')
+  getCaeBatchStatus(@Param('batchId') batchId: string) {
+    return this.tlqvInvoiceCaeBulkQueueService.getBatchStatus(
+      readRequiredBodyString(batchId, 'batchId'),
+    );
+  }
+
+  @ApiInternalEndpoint()
+  @ApiOperation({
+    summary:
+      'Entrega en el día en bulk: facturar, pedir el CAE y enviar a Mercado Libre',
+    description: [
+      'Para ventas con entrega en el día. Encola un trabajo por TLQV y los',
+      'procesa de a uno. Cada trabajo emite la factura desde la orden de',
+      'Mercado Libre, pide su CAE y adjunta el PDF a la venta. Si una etapa no',
+      'puede seguir, se detiene ahí y lo ya hecho queda hecho. Volver a enviar',
+      'la venta la retoma: no emite otra factura, no pide otro CAE y no manda',
+      'la factura dos veces. dryRun=true (por defecto) no emite, no pide y no',
+      'envía nada. El avance se sigue por Bull Board o por',
+      'GET bulk/entrega-en-el-dia/:batchId.',
+    ].join(' '),
+  })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['tlqvCodes'],
+      properties: {
+        tlqvCodes: {
+          type: 'array',
+          minItems: 1,
+          items: { type: 'string' },
+          example: ['TLQV-23500', 'TLQV-23501'],
+        },
+        dryRun: {
+          type: 'boolean',
+          default: true,
+          description:
+            'Para facturar, pedir el CAE y enviar de verdad, mandar false.',
+        },
+        issueDate: {
+          type: 'string',
+          example: '2026-11-27',
+          description:
+            'Fecha de emisión YYYY-MM-DD, común a todas. Opcional. Hasta 10 días hacia atrás.',
+        },
+        fechaFactura: {
+          type: 'string',
+          example: '2026-11-27',
+          description: 'Alias de issueDate.',
+        },
+      },
+      example: { tlqvCodes: ['TLQV-23500', 'TLQV-23501'], dryRun: true },
+    },
+  })
+  @Post('bulk/entrega-en-el-dia')
+  enqueueEntregaEnElDiaBulk(
+    @Body()
+    body: {
+      tlqvCodes?: unknown;
+      dryRun?: boolean;
+      issueDate?: string;
+      fechaFactura?: string;
+    } = {},
+  ) {
+    return this.tlqvInvoiceEntregaEnElDiaBulkQueueService.enqueueBulk({
+      tlqvCodes: readRequiredTlqvCodes(body.tlqvCodes),
+      dryRun: readOptionalBoolean(body.dryRun, 'dryRun'),
+      issueDate: readOptionalIssueDate(body.issueDate, body.fechaFactura),
+    });
+  }
+
+  @ApiInternalEndpoint()
+  @ApiOperation({ summary: 'Estado de un batch de entrega en el día' })
+  @Get('bulk/entrega-en-el-dia/:batchId')
+  getEntregaEnElDiaBatchStatus(@Param('batchId') batchId: string) {
+    return this.tlqvInvoiceEntregaEnElDiaBulkQueueService.getBatchStatus(
       readRequiredBodyString(batchId, 'batchId'),
     );
   }
@@ -590,6 +903,32 @@ function readOptionalBodyString(value: string | undefined): string | undefined {
   }
 
   return value.trim();
+}
+
+function readPositiveIntegerValue(value: unknown, field: string): number {
+  // A number, or digits in a string: panels send either. Nothing else, so a
+  // comprobante is never picked by a value that had to be guessed.
+  const numberValue =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && /^\d+$/.test(value.trim())
+        ? Number(value.trim())
+        : Number.NaN;
+  if (!Number.isSafeInteger(numberValue) || numberValue < 1) {
+    throw new BadRequestException(`${field} must be a positive integer`);
+  }
+
+  return numberValue;
+}
+
+function readPositiveIntegerList(value: unknown, field: string): number[] {
+  if (!Array.isArray(value)) {
+    throw new BadRequestException(`${field} must be an array`);
+  }
+
+  return value.map((item, index) =>
+    readPositiveIntegerValue(item, `${field}[${index}]`),
+  );
 }
 
 function readRequiredPositiveInteger(value: string, field: string): number {
