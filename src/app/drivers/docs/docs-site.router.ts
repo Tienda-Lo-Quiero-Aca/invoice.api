@@ -53,6 +53,11 @@ export const DOCS_PAGES: readonly DocsPage[] = [
     file: 'docs/front-entrega-en-el-dia.md',
   },
   {
+    group: 'API',
+    title: 'Guía para el front: entrega en el día en lote',
+    file: 'docs/front-entrega-en-el-dia-lote.md',
+  },
+  {
     group: 'Técnico',
     title: 'Arquitectura y configuración',
     file: 'docs/tecnico.md',

@@ -22,7 +22,7 @@ Todo lo que hace falta para sumar al panel la facturación desde la orden de Mer
 
 Quien factura ingresa un **TLQV** y el sistema emite la factura en Xubio tomando el importe y el comprador de la **orden de Mercado Libre**. Es para las ventas que se entregan en el día.
 
-Es un proceso distinto del de facturación habitual, con su propio endpoint. La pantalla es de **una venta por vez**: no hay lote.
+Es un proceso distinto del de facturación habitual, con su propio endpoint. La pantalla es de **una venta por vez** y solo emite la factura. Para facturar, pedir el CAE y enviar a Mercado Libre una lista de ventas de una sola vez, está la [guía del proceso en lote](front-entrega-en-el-dia-lote.md).
 
 El criterio de negocio —qué importe se factura, cuándo sale A o B, qué se controla— está en la [guía funcional](funcional.md#ventas-con-entrega-en-el-día). Acá va solo lo que necesita la pantalla.
 
@@ -263,7 +263,7 @@ Si llega un `code` que no está en estas tablas, mostrar el `message` tal cual y
 
 **Si se corta la conexión al emitir**, no reintentar solo. Vale lo mismo que para `XUBIO_INVOICE_OUTCOME_UNKNOWN`: no se sabe si la factura salió, y hay que mirar en Xubio.
 
-**Después de emitir, no dejar emitir de nuevo.** Una vez que llegó `createdInvoice`, sacar o deshabilitar el botón. El backend igual lo frenaría con `ALREADY_BILLED`, pero solo después de que la factura se sincronice, lo que puede tardar hasta dos horas.
+**Después de emitir, no dejar emitir de nuevo.** Una vez que llegó `createdInvoice`, sacar o deshabilitar el botón. El backend igual lo frena con `ALREADY_BILLED`, porque la factura se guarda en el registro de duplicados al emitir. La respuesta lo confirma con `madreSync.status: "synced"`. Si viene `"failed"`, ese freno no está durante las dos horas siguientes: mostrar el `madreSync.message` y no permitir otro intento.
 
 **Enviar siempre la fecha.** Mandar `issueDate` con la fecha del día en **hora de Argentina**, aunque la persona no la elija. Si no se envía, el servidor usa su propia fecha, que entre las 21:00 y la medianoche ya es la del día siguiente.
 
@@ -336,6 +336,11 @@ interface MeliOrderInvoiceResponse {
       cae: string | null;
     };
   };
+  /**
+   * Solo cuando la factura se emitió: si quedó guardada en el registro que
+   * controla los duplicados. Con 'failed', no permitir otro intento.
+   */
+  madreSync?: { status: 'synced' | 'failed'; message?: string };
 }
 ```
 

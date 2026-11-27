@@ -91,6 +91,7 @@ Para emitirla de verdad, el mismo llamado con `"dryRun": false`.
 |---|---|
 | [Referencia de la API](docs/api.md) | Todos los endpoints: facturas, notas de crédito, clientes, consulta fiscal, comprobantes e issues, con ejemplos. |
 | [Guía para el front: entrega en el día](docs/front-entrega-en-el-dia.md) | Cómo armar en el panel la pantalla que factura desde la orden de Mercado Libre: flujo, qué mostrar, y qué hacer con cada bloqueo. |
+| [Guía para el front: entrega en el día en lote](docs/front-entrega-en-el-dia-lote.md) | Cómo armar en el panel la pantalla que factura, pide el CAE y envía a Mercado Libre una lista de ventas: los dos endpoints, cómo seguir el avance y qué hacer con las que se detienen. |
 
 **Técnico**
 
