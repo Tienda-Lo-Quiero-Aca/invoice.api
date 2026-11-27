@@ -417,6 +417,8 @@ Por eso la copia se mantiene al día de dos maneras:
 
 Si esa copia falla, el comprobante **queda emitido igual** y la respuesta lo avisa (`madreSync`). En ese caso no hay que volver a facturar esa venta hasta la próxima sincronización, porque el control todavía no la ve.
 
+**Lo que se elimina en Xubio deja de contar.** Madre no borra un comprobante cuando se lo elimina en Xubio. Para que una factura eliminada no deje la venta marcada como facturada para siempre, antes de decidir el bot le pregunta a Xubio por los comprobantes **sin CAE** que Madre tiene de esa venta, y descarta los que ya no existen. Solo los que no tienen CAE, porque son los únicos que Xubio deja eliminar. Si Xubio no responde, no descarta nada: ante la duda, la venta sigue contando como facturada.
+
 **Cada 2 horas, todo.** Una sincronización relee los últimos 7 días de Xubio. Es la que trae lo que se cargó a mano en Xubio y la que cubre cualquier copia inmediata que haya fallado. Releer con superposición evita huecos si una corrida falla o si un comprobante se cargó tarde. También se puede disparar a mano desde la [API](api.md#comprobantes).
 
 Si Madre no responde al momento de facturar, el bot **bloquea** en lugar de asumir que la venta no está facturada.

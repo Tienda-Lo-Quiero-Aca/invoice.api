@@ -189,6 +189,23 @@ describe('RequestCaeInteractor', () => {
       expect(result.blockers[0].code).toBe('CAE_REQUEST_OUTCOME_UNKNOWN');
     });
 
+    it('skips a comprobante that was deleted in Xubio: there is nothing to authorize', async () => {
+      const dependencies = createDependencies();
+      dependencies.detail.getDetail.mockRejectedValue(
+        Object.assign(new Error('no existe'), { notFound: true }),
+      );
+      const interactor = createInteractor(dependencies);
+
+      const result = await interactor.execute({
+        transaccionId: ID,
+        dryRun: false,
+      });
+
+      expect(result.status).toBe('skipped');
+      expect(result.blockers[0].code).toBe('COMPROBANTE_DELETED_IN_XUBIO');
+      expect(dependencies.requestCae.requestCae).not.toHaveBeenCalled();
+    });
+
     it('blocks without asking AFIP when the comprobante cannot be read', async () => {
       const dependencies = createDependencies();
       dependencies.detail.getDetail.mockRejectedValue(new Error('HTTP 404'));

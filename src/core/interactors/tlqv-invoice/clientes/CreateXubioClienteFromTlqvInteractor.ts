@@ -26,6 +26,7 @@ import {
   type PrepareTlqvInvoiceBlocker,
   type PrepareTlqvInvoiceResponse,
 } from '../preparacion/PrepareTlqvInvoiceInteractor';
+import { normalizeXubioProvinciaNombre } from '../../xubio/clientes/normalizeXubioProvinciaNombre';
 
 const DEFAULT_PAIS_CODIGO = 'ARGENTINA';
 const DEFAULT_DESCRIPCION = 'Cliente creado automáticamente desde TLQV';
@@ -33,14 +34,6 @@ const CONSUMIDOR_FINAL_CONDICION_IMPOSITIVA = 'CONSUMIDOR FINAL';
 const CONSUMIDOR_FINAL_CATEGORIA_FISCAL = 'CF';
 const DNI_IDENTIFICACION_TRIBUTARIA = 'DNI';
 const DNI_DERIVABLE_10_DIGIT_PREFIXES = new Set(['20', '23', '24', '27', '30']);
-
-// Ops API still returns the pre-2007 "Capital Federal" name for some CABA
-// sales; Xubio's NXVProvincia catalog only recognizes
-// "Ciudad Autónoma de Buenos Aires" and rejects the old name outright.
-const XUBIO_PROVINCIA_NOMBRE_ALIASES: Record<string, string> = {
-  CAPITALFEDERAL: 'Ciudad Autónoma de Buenos Aires',
-  CABA: 'Ciudad Autónoma de Buenos Aires',
-};
 
 const TLQV_INVOICEABLE_ESTADO_VBI_VALUES = [
   'DESPACHADA_BUENOS_AIRES',
@@ -1261,16 +1254,6 @@ function normalizeForComparison(value: string | null | undefined): string {
       .trim()
       .toUpperCase() ?? ''
   );
-}
-
-function normalizeXubioProvinciaNombre(value: string): string {
-  const key = value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, '');
-
-  return XUBIO_PROVINCIA_NOMBRE_ALIASES[key] ?? value;
 }
 
 function normalizeOptionalString(

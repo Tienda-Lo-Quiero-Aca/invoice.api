@@ -5,6 +5,7 @@ import type {
   CreateXubioClienteResponse,
   XubioClientePayload,
 } from '../../../entities/xubio/clientes/XubioCliente';
+import { normalizeXubioProvinciaNombre } from '../../xubio/clientes/normalizeXubioProvinciaNombre';
 
 const DEFAULT_PAIS_CODIGO = 'ARGENTINA';
 const DEFAULT_DESCRIPCION = 'Cliente creado automáticamente desde TLQV';
@@ -270,7 +271,7 @@ function buildConsumidorFinalClienteData(
       provincia === null
         ? null
         : {
-            nombre: provincia,
+            nombre: normalizeXubioProvinciaNombre(provincia),
           },
     usrCode,
     descripcion: DEFAULT_DESCRIPCION,

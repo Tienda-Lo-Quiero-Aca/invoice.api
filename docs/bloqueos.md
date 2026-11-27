@@ -45,6 +45,8 @@ etapa | CÓDIGO: explicación
 
 La venta ya tiene una factura vigente en Madre. Una factura anulada por nota de crédito no cuenta.
 
+Una factura que se eliminó en Xubio no cuenta: el bot lo verifica contra Xubio antes de bloquear.
+
 **Qué hacer:** nada, es el control de duplicados funcionando. Si la factura existente está mal, emitir la nota de crédito, pedirle el CAE y recién después refacturar.
 
 ### `BILLING_VALIDATION_UNAVAILABLE`
@@ -395,6 +397,12 @@ Propios de [pedir el CAE](funcional.md#el-cae). No se guardan como issue: el com
 El comprobante ya tiene CAE. La respuesta sale como `skipped` y no se pide otro.
 
 **Qué hacer:** nada.
+
+### `COMPROBANTE_DELETED_IN_XUBIO`
+
+El comprobante figura en Madre pero ya no existe en Xubio: fue eliminado. La respuesta sale como `skipped`.
+
+**Qué hacer:** nada. No hay CAE que pedir.
 
 ### `CAE_REJECTED`
 

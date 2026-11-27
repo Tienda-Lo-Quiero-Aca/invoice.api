@@ -132,6 +132,8 @@ El backfill corre cada 2 horas, y el control de duplicados lee Madre. Para que n
 | Factura nueva (planilla o entrega en el día), nota de crédito nueva, CAE otorgado | `TlqvInvoiceFacturasService`, después del caso de uso. Lo usan los endpoints de a uno y las colas. |
 | Lote de entrega en el día | `CompleteMeliOrderSaleInteractor`: una vez al emitir, antes de pedir el CAE, y otra al obtenerlo. |
 
+**Lo eliminado en Xubio.** Madre no tiene baja de comprobantes. `XubioVerifiedMadreComprobantesRepository` envuelve al repositorio de Madre y, en `findFullByTlqvCode`, saca los comprobantes sin CAE que Xubio informa como inexistentes (`XubioComprobanteNotFoundError`, que se reconoce por el texto "La Factura de Venta no existe"). Todo lo que decide sobre los comprobantes de un TLQV —control de duplicados, notas de crédito, envío a Mercado Libre, lote de entrega en el día— pasa por ahí. El registro queda en Madre; solo se ignora.
+
 Nunca hace fallar la operación: el comprobante ya existe en Xubio. El resultado va en `madreSync` (`synced` o `failed`) y una falla queda en el log. El backfill sigue siendo la red de seguridad.
 
 ---

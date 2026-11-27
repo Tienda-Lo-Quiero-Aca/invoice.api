@@ -14,6 +14,7 @@ export type RequestCaeStatus = 'authorized' | 'ready' | 'skipped' | 'blocked';
 export type RequestCaeBlockerCode =
   | 'XUBIO_COMPROBANTE_LOOKUP_FAILED'
   | 'ALREADY_HAS_CAE'
+  | 'COMPROBANTE_DELETED_IN_XUBIO'
   | 'CAE_REJECTED'
   | 'CAE_REQUEST_OUTCOME_UNKNOWN'
   | 'COMPROBANTES_LOOKUP_FAILED'
@@ -102,6 +103,21 @@ export class RequestCaeInteractor {
     try {
       before = await this.readComprobante(transaccionId);
     } catch (error: unknown) {
+      if (wasDeletedInXubio(error)) {
+        // Still listed in Madre, gone from Xubio: there is nothing to ask a
+        // CAE for, and nothing wrong with that.
+        return {
+          ...base,
+          status: 'skipped',
+          blockers: [
+            {
+              code: 'COMPROBANTE_DELETED_IN_XUBIO',
+              message: `El comprobante ${transaccionId} ya no existe en Xubio: fue eliminado. No hay CAE que pedir.`,
+            },
+          ],
+        };
+      }
+
       return {
         ...base,
         status: 'blocked',
@@ -383,6 +399,14 @@ function formatCaeExpiration(
 
 function describe(comprobante: CaeComprobanteSummary): string {
   return comprobante.numeroDocumento ?? String(comprobante.transaccionId);
+}
+
+function wasDeletedInXubio(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { notFound?: unknown }).notFound === true
+  );
 }
 
 function hasUnknownOutcome(error: unknown): boolean {

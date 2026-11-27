@@ -47,7 +47,7 @@ describe('CreateXubioConsumidorFinalClienteFromIssueInteractor', () => {
         direccion: 'CALDAS 1551',
         codigoPostal: '1427',
         provincia: {
-          nombre: 'CIUDAD AUTONOMA DE BUENOS AIRES',
+          nombre: 'Ciudad Autónoma de Buenos Aires',
         },
         usrCode: 'TLQV-20444823993',
         descripcion: 'Cliente creado automáticamente desde TLQV',
@@ -95,7 +95,7 @@ describe('CreateXubioConsumidorFinalClienteFromIssueInteractor', () => {
         direccion: 'CALDAS 1551',
         codigoPostal: '1427',
         provincia: {
-          nombre: 'CIUDAD AUTONOMA DE BUENOS AIRES',
+          nombre: 'Ciudad Autónoma de Buenos Aires',
         },
         usrCode: 'TLQV-20444823993',
         descripcion: 'Cliente creado automáticamente desde TLQV',

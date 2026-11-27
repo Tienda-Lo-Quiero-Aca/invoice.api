@@ -70,7 +70,7 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
         direccion: 'Belgrano 53',
         codigoPostal: '5000',
         provincia: {
-          nombre: 'CORDOBA',
+          nombre: 'Cordoba',
         },
         usrCode: 'TLQV-27187719572',
         pais: {
@@ -387,7 +387,7 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
         direccion: 'Belgrano 53',
         codigoPostal: '5000',
         provincia: {
-          nombre: 'CORDOBA',
+          nombre: 'Cordoba',
         },
         usrCode: 'TLQV-33716542969',
         descripcion: 'Cliente creado automáticamente desde TLQV',
@@ -763,7 +763,7 @@ describe('CreateXubioClienteFromTlqvInteractor', () => {
         direccion: 'Belgrano 53',
         codigoPostal: '5000',
         provincia: {
-          nombre: 'CORDOBA',
+          nombre: 'Cordoba',
         },
         usrCode: 'TLQV-27187719572',
         descripcion: 'Cliente creado automáticamente desde TLQV',

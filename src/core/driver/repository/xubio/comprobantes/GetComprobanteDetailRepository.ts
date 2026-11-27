@@ -36,6 +36,20 @@ export class XubioComprobanteDetailRequestError extends Error {
   }
 }
 
+/**
+ * Xubio answered that the comprobante does not exist: it was deleted. Only a
+ * comprobante without CAE can be deleted, so this is never a fiscal document
+ * that went missing.
+ */
+export class XubioComprobanteNotFoundError extends XubioComprobanteDetailRequestError {
+  readonly notFound = true;
+
+  constructor(transaccionId: number) {
+    super(transaccionId, 'no existe en Xubio (fue eliminado)');
+    this.name = XubioComprobanteNotFoundError.name;
+  }
+}
+
 export class GetComprobanteDetailRepository implements IGetComprobanteDetailRepository {
   private readonly httpClient: AxiosInstance;
   private readonly authorizationToken?: string;
@@ -116,6 +130,10 @@ function buildRequestError(
   if (axios.isAxiosError(error)) {
     const status = error.response?.status;
     const body: unknown = error.response?.data;
+    if (saysComprobanteDoesNotExist(body)) {
+      return new XubioComprobanteNotFoundError(transaccionId);
+    }
+
     const detail =
       status === undefined
         ? error.message
@@ -131,12 +149,43 @@ function buildRequestError(
   return new XubioComprobanteDetailRequestError(transaccionId, 'unknown error');
 }
 
+// Xubio reports it as a business error — HTTP 401, codeResponse 406 — whose
+// text is the only thing that tells it apart: "La Factura de Venta no existe".
+const DOES_NOT_EXIST_PATTERN =
+  /^La (Factura de Venta|Nota de Cr[eé]dito( de Venta)?) no existe\.?$/i;
+
+function saysComprobanteDoesNotExist(body: unknown): boolean {
+  if (typeof body !== 'object' || body === null) {
+    return false;
+  }
+
+  const { description, message } = body as Record<string, unknown>;
+
+  return [description, message].some(
+    (text) =>
+      typeof text === 'string' && DOES_NOT_EXIST_PATTERN.test(text.trim()),
+  );
+}
+
 function serializeResponseBody(value: unknown): string {
   if (typeof value === 'string') {
     return value;
   }
 
   try {
+    // Xubio sends its whole Java stack trace along. It says nothing to whoever
+    // reads the error and buries the one line that does.
+    if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+      const rest: Record<string, unknown> = {
+        ...(value as Record<string, unknown>),
+      };
+      delete rest.stackTrace;
+      delete rest.suppressed;
+      delete rest.cause;
+
+      return JSON.stringify(rest);
+    }
+
     return JSON.stringify(value);
   } catch {
     return 'unserializable response body';

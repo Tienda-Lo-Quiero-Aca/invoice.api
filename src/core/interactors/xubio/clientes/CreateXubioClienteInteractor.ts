@@ -6,17 +6,10 @@ import type {
   XubioCategoriaFiscalCodigo,
   XubioClientePayload,
 } from '../../../entities/xubio/clientes/XubioCliente';
+import { normalizeXubioProvinciaNombre } from './normalizeXubioProvinciaNombre';
 
 const DEFAULT_PAIS_CODIGO = 'ARGENTINA';
 const DEFAULT_DESCRIPCION = 'Cliente creado automáticamente desde TLQV';
-
-// Ops API still returns the pre-2007 "Capital Federal" name for some CABA
-// sales; Xubio's NXVProvincia catalog only recognizes
-// "Ciudad Autónoma de Buenos Aires" and rejects the old name outright.
-const XUBIO_PROVINCIA_NOMBRE_ALIASES: Record<string, string> = {
-  CAPITALFEDERAL: 'Ciudad Autónoma de Buenos Aires',
-  CABA: 'Ciudad Autónoma de Buenos Aires',
-};
 
 export class CreateXubioClienteInteractor {
   constructor(
@@ -217,14 +210,4 @@ function normalizeForComparison(value: string): string {
     .replace(/[\u0300-\u036f]/g, '')
     .trim()
     .toUpperCase();
-}
-
-function normalizeXubioProvinciaNombre(value: string): string {
-  const key = value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, '');
-
-  return XUBIO_PROVINCIA_NOMBRE_ALIASES[key] ?? value;
 }
